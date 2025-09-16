@@ -3,7 +3,20 @@
 @tailwind utilities;
 
 
+html, body {
+  background: linear-gradient(135deg, #1f2937 0%, #111827 50%, #1f2937 100%);
+  min-height: 100vh;
+}
 
+/* Ensure no white backgrounds leak through */
+* {
+  box-sizing: border-box;
+}
+
+/* Fix any white background overrides */
+.bg-white {
+  background-color: transparent !important;
+}
 @layer base {
   :root {
     --background: 0 0% 100%;

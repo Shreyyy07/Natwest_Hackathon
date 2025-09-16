@@ -1,852 +1,728 @@
-"use client";
+'use client';
 
-import type React from "react";
-import {
-  useState,
-  useRef,
-  useEffect,
-  useCallback,
-  type ComponentPropsWithoutRef,
-} from "react";
-import { useSearchParams } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  MicrophoneIcon,
-  PaperAirplaneIcon,
-  StopIcon,
-} from "@heroicons/react/24/solid";
-import { Loader2, Speaker } from "lucide-react";
-import Navbar from "@/components/custom/navbar";
-import axios from "axios";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
-
-// === BRAND COLORS & THEME MATCHING LANDING PAGE ===
-const SOFT_BG_GRADIENT =
-  "bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-[#e8eafe] via-[#f7e8fc] to-[#f7e8fc]";
-const CARD_BG =
-  "bg-white/80 backdrop-blur-2xl shadow-2xl rounded-[2.5rem] border border-[#e2e6fa]";
-// Chat bubbles
-const USER_BUBBLE =
-  "bg-gradient-to-tr from-[#4f5eff]/90 to-[#7a5cfa]/90 text-white border border-[#c3cafd]/60";
-const AI_BUBBLE =
-  "bg-white/90 border border-[#f1eafd] shadow-md";
-const AI_BUBBLE_EXTRA = "before:absolute before:inset-0 before:bg-gradient-to-r before:from-[#e8eafe]/60 before:to-[#f7e8fc]/30 before:opacity-80 before:pointer-events-none";
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useUser, SignOutButton } from '@clerk/nextjs';
+import { toast } from 'sonner';
+import { Send, BookOpen, ArrowLeft, User, Bot, ChevronLeft, ChevronRight, Menu, Trophy, Target, Zap, Star, ImageIcon } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
   id: number;
+  sender: 'user' | 'ai';
   content: string;
-  sender: "user" | "ai";
-  quiz?: QuizBlock;
+  timestamp: Date;
+  topic?: string;
+  imageUrl?: string;
+  pointsEarned?: number;
+  achievements?: string[];
 }
 
-interface QuizBlock {
-  questions: QuizQuestion[];
-  userAnswers: (string | null)[];
-  results: (boolean | null)[];
-  showResults: boolean;
-  showButton: boolean;
-}
-
-interface QuizQuestion {
-  question_text: string;
-  options: string[];
-  correct_answer: string;
-  explanation: string;
-  diagram?: string;
-}
-
-const LOCALSTORAGE_KEY = "tayyari-chat-messages-v2";
-
-const Chat: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [recording, setRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunks = useRef<Blob[]>([]);
-  const audioRef = useRef<HTMLAudioElement>(null);
-
+export default function EnhancedChatPage() {
+  const { user } = useUser();
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const submitTimeoutRef = useRef<NodeJS.Timeout>();
 
-  const scrollToBottom = useCallback(() => {
-    if (containerRef.current) {
-      setTimeout(() => {
-        containerRef.current?.scrollTo({
-          top: containerRef.current.scrollHeight,
-          behavior: "smooth",
-        });
-      }, 120);
-    }
-  }, []);
-
-  // === STATE RESTORATION ===
+  // Auto-scroll to bottom
   useEffect(() => {
-    const saved = localStorage.getItem(LOCALSTORAGE_KEY);
-    if (saved) {
-      try {
-        setMessages(JSON.parse(saved));
-      } catch (e) {
-        setMessages([]);
-      }
-    }
-  }, []);
-  useEffect(() => {
-    localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(messages));
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  // === PROMPT FROM /LEARN PAGE ===
+  // Initialize with URL prompt
   useEffect(() => {
-    const prompt = searchParams.get("prompt");
-    if (prompt && messages.length === 0) {
-      const userMessage: Message = {
-        id: Date.now(),
-        content: prompt,
-        sender: "user",
-      };
-      setMessages([userMessage]);
-      setIsLoading(true);
-      axios
-        .post("http://127.0.0.1:5000/process-content", {
-          notes: prompt,
-          files: [],
-        })
-        .then((response) => {
-          const aiContent =
-            response.data.explanation ||
-            response.data.response ||
-            response.data.summary ||
-            "Sorry, I couldn't generate a response";
-          const aiMessage: Message = {
-            id: Date.now() + 1,
-            content: aiContent,
-            sender: "ai",
-          };
-          setMessages([userMessage, aiMessage]);
-        })
-        .catch(() => {
-          setMessages([
-            userMessage,
-            {
-              id: Date.now() + 1,
-              content: "Oops! Something went wrong. Please try again.",
-              sender: "ai",
-            },
-          ]);
-        })
-        .finally(() => setIsLoading(false));
+    const prompt = searchParams.get('prompt');
+    if (prompt && !isSending) {
+      setInputValue(prompt);
+      handleSubmit(prompt);
     }
-    // eslint-disable-next-line
-  }, []);
+  }, [searchParams]);
 
-  // === SEND MESSAGE ===
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
+  // Generate relevant image for topic
+  const generateTopicImage = async (topic: string): Promise<string | null> => {
+  try {
+    // Clean up topic for better image results
+    const cleanTopic = topic.toLowerCase()
+      .replace(/[^\w\s]/gi, '') // Remove special characters
+      .replace(/\s+/g, '+'); // Replace spaces with +
+    
+    // Unsplash Source API (free, no API key needed)
+    const unsplashUrl = `https://source.unsplash.com/800x600/?${encodeURIComponent(cleanTopic)}&auto=format&fit=crop&w=800&q=80`;
+    
+    return unsplashUrl;
+  } catch (error) {
+    console.error('Error generating topic image:', error);
+    return null;
+  }
+};
+
+  // Enhanced submit with architecture diagrams and images
+  const handleSubmit = useCallback(async (customInput?: string) => {
+    const input = customInput || inputValue;
+    if (!input.trim() || isSending) return;
+
+    // Clear any existing timeout
+    if (submitTimeoutRef.current) {
+      clearTimeout(submitTimeoutRef.current);
+    }
+
+    setIsSending(true);
     const userMessage: Message = {
       id: Date.now(),
+      sender: 'user',
       content: input,
-      sender: "user",
+      timestamp: new Date()
     };
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
+
+    setMessages(prev => [...prev, userMessage]);
+    setInputValue('');
     setIsLoading(true);
 
     try {
-      const response = await axios.post(
-        "http://127.0.0.1:5000/process-content",
-        {
+      // Call your backend API
+      const response = await fetch('http://localhost:5000/process-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           notes: input,
-          files: [],
-        }
-      );
-      const aiContent =
-        response.data.explanation ||
-        response.data.response ||
-        response.data.summary ||
-        response.data.learning_plan ||
-        "Sorry, I couldn't generate a response";
+          files: []
+        })
+      });
 
-      const aiMessage: Message = {
-        id: Date.now() + 1,
-        content: aiContent,
-        sender: "ai",
-      };
-      setMessages((prev) => [...prev, aiMessage]);
-    } catch (error) {
-      const errorMessage: Message = {
-        id: Date.now() + 1,
-        content: "Oops! Something went wrong. Please try again.",
-        sender: "ai",
-      };
-      setMessages((prev) => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+      const data = await response.json();
 
-  // === VOICE RECORDING ===
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunks.current.push(event.data);
-        }
-      };
-      recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunks.current, { type: "audio/wav" });
-        const audioFile = new File([audioBlob], "recorded_audio.wav", {
-          type: "audio/wav",
-        });
-        audioChunks.current = [];
-        setIsTranscribing(true);
-        const formData = new FormData();
-        formData.append("file", audioFile);
-        try {
-          const response = await axios.post(
-            "http://127.0.0.1:5000/speech2text",
-            formData,
-            {
-              headers: { "Content-Type": "multipart/form-data" },
-            }
-          );
-          setInput((prev) => prev + (prev ? " " : "") + response.data.text);
-        } catch (error) {
-        } finally {
-          setIsTranscribing(false);
-        }
-      };
-      recorder.start();
-      setRecording(true);
-    } catch (error) {}
-  };
-  const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      setRecording(false);
-      mediaRecorderRef.current.stream
-        .getTracks()
-        .forEach((track) => track.stop());
-    }
-  };
-
-  // === TEXT TO SPEECH ===
-  const toggleSpeech = async (text: string) => {
-    if (isSpeaking) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      setIsSpeaking(false);
-      return;
-    }
-    try {
-      setIsProcessingAudio(true);
-      const formData = new FormData();
-      formData.append("text", text);
-      const response = await axios.post(
-        "http://127.0.0.1:5000/process-text2speech",
-        formData,
-        { responseType: "blob" }
-      );
-      const audioBlob = new Blob([response.data], { type: "audio/wav" });
-      const audioUrl = URL.createObjectURL(audioBlob);
-      if (audioRef.current) {
-        audioRef.current.src = audioUrl;
-        audioRef.current.onended = () => {
-          setIsSpeaking(false);
-          URL.revokeObjectURL(audioUrl);
-        };
-        audioRef.current.play();
-        setIsSpeaking(true);
-      }
-    } catch (error) {
-      setIsSpeaking(false);
-    } finally {
-      setIsProcessingAudio(false);
-    }
-  };
-
-  // === EXPLAIN MORE ===
-  const handleExplainMore = async (content: string) => {
-    setIsLoading(true);
-    try {
-      const response = await axios.post(
-        "http://127.0.0.1:5000/explain-more",
-        {
-          question: "Explain in more depth",
-          context: content,
-        }
-      );
-      const aiContent =
-        response.data.response ||
-        "I couldn't generate a deeper explanation";
-      const aiMessage: Message = {
-        id: Date.now(),
-        content: aiContent,
-        sender: "ai",
-      };
-      setMessages((prev) => [...prev, aiMessage]);
-    } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          content: "Sorry, I couldn't generate a deeper explanation.",
-          sender: "ai",
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // === QUIZ ===
-  const handleInteractiveQuestions = async (content: string) => {
-    setIsLoading(true);
-    try {
-      const response = await axios.post(
-        "http://127.0.0.1:5000/interactive-questions",
-        { context: content }
-      );
-      const questions = response.data.questions;
-      if (
-        Array.isArray(questions) &&
-        questions.length > 0 &&
-        questions[0].question_text !== "Could not generate proper questions."
-      ) {
-        const quizBlock: QuizBlock = {
-          questions,
-          userAnswers: Array(questions.length).fill(null),
-          results: Array(questions.length).fill(null),
-          showResults: false,
-          showButton: false,
-        };
+      if (data.status === 'success') {
+        // Generate enhanced response with architecture diagram and image
+        const enhancedResponse = await generateEnhancedResponse(input, data.response);
+        
+        // Generate topic image
+        const topicImage = await generateTopicImage(enhancedResponse.topic);
+        
         const aiMessage: Message = {
-          id: Date.now(),
-          content: "Quiz Time!",
-          sender: "ai",
-          quiz: quizBlock,
+          id: Date.now() + 1,
+          sender: 'ai',
+          content: enhancedResponse.content,
+          timestamp: new Date(),
+          topic: enhancedResponse.topic,
+          imageUrl: topicImage || undefined,
+          pointsEarned: enhancedResponse.pointsEarned,
+          achievements: enhancedResponse.achievements
         };
-        setMessages((prev) => [...prev, aiMessage]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now(),
-            content:
-              "Sorry, I couldn't generate quiz questions for this content. Try rephrasing or using another topic.",
-            sender: "ai",
-          },
-        ]);
+
+        setMessages(prev => [...prev, aiMessage]);
+        
+        // Show achievement notifications
+        if (enhancedResponse.achievements.length > 0) {
+          enhancedResponse.achievements.forEach(achievement => {
+            toast.success(`🏆 Achievement Unlocked: ${achievement}`, {
+              duration: 4000,
+              className: 'bg-gradient-to-r from-yellow-500 to-orange-500'
+            });
+          });
+        }
+
+        // Update recent learning
+        updateRecentLearning(input, enhancedResponse.content);
       }
     } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          content: "Sorry, I couldn't generate interactive questions.",
-          sender: "ai",
-        },
-      ]);
+      console.error('Error:', error);
+      toast.error('Oops! Something went wrong. Try again!');
     } finally {
       setIsLoading(false);
+      // Debounce to prevent rapid submissions
+      submitTimeoutRef.current = setTimeout(() => {
+        setIsSending(false);
+      }, 1000);
+    }
+  }, [inputValue, isSending]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
     }
   };
 
-  // === QUIZ ANSWER ===
-  const handleQuizAnswer = (
-    messageIdx: number,
-    questionIdx: number,
-    selected: string
-  ) => {
-    setMessages((prev) => {
-      const newMessages = [...prev];
-      const oldQuiz = newMessages[messageIdx].quiz;
-      if (!oldQuiz) return prev;
-      if (oldQuiz.showResults) return prev;
-      const quiz: QuizBlock = {
-        ...oldQuiz,
-        userAnswers: [...oldQuiz.userAnswers],
-        results: [...oldQuiz.results],
-      };
-      quiz.userAnswers[questionIdx] = selected;
-      if (
-        quiz.userAnswers.every((ans) => typeof ans === "string") &&
-        !quiz.showResults
-      ) {
-        quiz.showButton = true;
-      }
-      newMessages[messageIdx] = { ...newMessages[messageIdx], quiz };
-      return newMessages;
-    });
-  };
-
-  // === SHOW CORRECT ANSWERS BUTTON (IMMUTABLE UPDATE) ===
-  const handleQuizReveal = (messageIdx: number) => {
-    setMessages((prev) => {
-      const newMessages = [...prev];
-      const oldQuiz = newMessages[messageIdx].quiz;
-      if (!oldQuiz || oldQuiz.showResults) return prev;
-      const quiz: QuizBlock = {
-        ...oldQuiz,
-        userAnswers: [...oldQuiz.userAnswers],
-        results: oldQuiz.questions.map(
-          (q, i) => oldQuiz.userAnswers[i] === q.correct_answer
-        ),
-        showResults: true,
-        showButton: false,
-      };
-      newMessages[messageIdx] = { ...newMessages[messageIdx], quiz };
-      return newMessages;
-    });
-  };
-
-  // === NEW CHAT ===
-  const handleNewChat = () => {
-    setMessages([]);
-    window.location.reload();
-  };
-
-  // === "Learn More With Quizzes" ===
-  const handleLearnMoreWithQuizzes = (quiz: QuizBlock) => {
-    const context = quiz.questions.map(
-      (q, i) => `Q${i + 1}: ${q.question_text}\nA: ${q.correct_answer}\nExplanation: ${q.explanation}\n`
-    ).join("\n");
-    handleExplainMore(context);
+  const updateRecentLearning = (userMessage: string, aiResponse: string) => {
+    const LOCALSTORAGE_KEY = "tayyari-chat-messages-v2";
+    try {
+      const existing = localStorage.getItem(LOCALSTORAGE_KEY);
+      const messages = existing ? JSON.parse(existing) : [];
+      
+      const newMessages = [
+        ...messages,
+        { id: Date.now(), sender: 'user', content: userMessage, timestamp: new Date() },
+        { id: Date.now() + 1, sender: 'ai', content: aiResponse, timestamp: new Date() }
+      ];
+      
+      localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(newMessages));
+    } catch (error) {
+      console.error('Error updating recent learning:', error);
+    }
   };
 
   return (
-    <div
-      className={`min-h-screen flex flex-col ${SOFT_BG_GRADIENT} transition-all`}
-      style={{
-        background: "radial-gradient(ellipse at 60% 20%, #e8eafe 60%, #f7e8fc 100%)",
-        minHeight: "100vh",
-      }}
-    >
-      <Navbar loggedIn={true} />
-      <motion.div
-        className={`${CARD_BG} flex flex-col flex-grow p-8 md:p-12 mx-auto my-10 max-w-4xl`}
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        style={{
-          minHeight: "72vh",
-          boxShadow: "0 10px 40px 0 #e0daff80",
-        }}
-      >
-        <div className="flex flex-col h-full">
-          <div
-            ref={containerRef}
-            className="messages-container flex-grow overflow-y-auto mb-4 space-y-6 pb-[160px]"
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white pt-8">
+      <div className="flex h-[calc(100vh-2rem)]"> {/* Reduced height calculation */}
+        
+        {/* Collapsible Sidebar */}
+        <AnimatePresence>
+          <motion.div 
+            initial={false}
+            animate={{ 
+              width: sidebarCollapsed ? 60 : 320,
+              opacity: sidebarCollapsed ? 0.7 : 1 
+            }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            className="bg-gray-800/50 backdrop-blur-sm border-r border-gray-700/50 flex flex-col relative"
           >
-            <AnimatePresence mode="popLayout">
-              {messages.map((message, idx) => (
-                <motion.div
-                  key={message.id}
-                  className="flex justify-center"
-                  initial={{
-                    opacity: 0,
-                    y: 20,
-                    scale: 0.95,
-                  }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{
-                    opacity: 0,
-                    scale: 0.95,
-                    transition: { duration: 0.2 },
-                  }}
-                  transition={{ duration: 0.3, ease: "easeOut" }}
-                  layout
-                >
-                  <div
-                    className={[
-                      "w-[97%] md:w-[85%] p-6 md:p-7 rounded-2xl shadow transition-all relative",
-                      message.sender === "user"
-                        ? USER_BUBBLE
-                        : `${AI_BUBBLE} ${AI_BUBBLE_EXTRA}`,
-                      message.sender === "ai"
-                        ? "hover:shadow-[#a6b1ff]/40 hover:scale-[1.01] duration-200"
-                        : "hover:shadow-[#c3cafd]/40 hover:scale-[1.01]",
-                    ].join(" ")}
-                  >
-                    {message.sender === "ai" && message.quiz ? (
-                      <QuizUI
-                        quiz={message.quiz}
-                        messageIdx={idx}
-                        onSelect={handleQuizAnswer}
-                        onReveal={handleQuizReveal}
-                        onLearnMore={handleLearnMoreWithQuizzes}
-                        onNewChat={handleNewChat}
-                      />
-                    ) : message.sender === "ai" ? (
-                      <>
-                        <ReactMarkdown
-                          remarkPlugins={[remarkMath]}
-                          rehypePlugins={[rehypeKatex]}
-                          components={{
-                            h2: ({ children, ...props }) => (
-                              <h2
-                                {...props}
-                                className="text-3xl font-extrabold flex items-center gap-2 mb-3 text-[#4f5eff]"
-                              >
-                                {children}
-                              </h2>
-                            ),
-                            li: ({ children, ...props }) => (
-                              <li {...props} className="mb-2 text-lg leading-relaxed flex items-start gap-2 text-[#2a2657]">
-                                <span>•</span>
-                                <span>{children}</span>
-                              </li>
-                            ),
-                            p: ({ children }) => (
-                              <div className="prose prose-sm max-w-none dark:prose-invert mb-4 font-medium text-[1.05rem] transition-colors">
-                                {children}
-                              </div>
-                            ),
-                            img: ({ ...props }) => (
-                              <img
-                                {...props}
-                                className="mx-auto my-4 rounded-xl border-2 border-fuchsia-200/40 shadow-2xl animate-fadeIn"
-                                style={{ maxHeight: 260, objectFit: "contain" }}
-                              />
-                            ),
-                            code: ({
-                              className,
-                              children,
-                            }: ComponentPropsWithoutRef<"code"> & {
-                              className?: string;
-                            }) =>
-                              className?.includes("language-") ? (
-                                <pre className="rounded-lg bg-black/90 text-white p-3 overflow-x-auto font-mono my-2 text-xs">
-                                  <code className={className}>{children}</code>
-                                </pre>
-                              ) : (
-                                <code className="bg-fuchsia-100/75 px-1 py-0.5 rounded text-fuchsia-700">{children}</code>
-                              ),
-                          }}
-                        >
-                          {message.content}
-                        </ReactMarkdown>
-                        <div className="flex gap-2 mt-3">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-xs font-semibold bg-gradient-to-tr from-fuchsia-100 to-blue-100 border border-blue-200 text-blue-700 hover:from-fuchsia-200 hover:to-blue-200"
-                            onClick={() => handleExplainMore(message.content)}
-                          >
-                            Learn More
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-xs font-semibold bg-gradient-to-tr from-green-100 to-cyan-100 border border-green-200 text-green-800 hover:from-green-200 hover:to-cyan-200"
-                            onClick={() =>
-                              handleInteractiveQuestions(message.content)
-                            }
-                          >
-                            Take Quiz
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-xs font-semibold bg-gradient-to-tr from-yellow-100 to-pink-100 border border-pink-200 text-pink-700 hover:from-yellow-200 hover:to-pink-200"
-                            onClick={() => toggleSpeech(message.content)}
-                            disabled={isProcessingAudio}
-                          >
-                            {isProcessingAudio ? (
-                              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                            ) : (
-                              <Speaker className="h-4 w-4 mr-1" />
-                            )}
-                            {isSpeaking ? "Stop" : isProcessingAudio ? "Processing..." : "Listen"}
-                          </Button>
-                        </div>
-                      </>
-                    ) : (
-                      <span className="font-bold text-lg tracking-wide">{message.content}</span>
-                    )}
-                  </div>
-                </motion.div>
-              ))}
-              {isLoading && (
-                <motion.div
-                  key="loading"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="flex justify-start"
-                >
-                  <div className="max-w-[70%] p-4 rounded-xl bg-gradient-to-r from-fuchsia-100 via-blue-100 to-cyan-100 border-2 border-blue-200/40 shadow-lg flex items-center gap-2">
-                    <div
-                      className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"
-                      style={{ animationDelay: "0ms" }}
-                    />
-                    <div
-                      className="w-2 h-2 bg-fuchsia-500 rounded-full animate-bounce"
-                      style={{ animationDelay: "150ms" }}
-                    />
-                    <div
-                      className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "300ms" }}
-                    />
-                  </div>
-                </motion.div>
-              )}
-              <div key="scroll-anchor" ref={messagesEndRef} className="h-0" />
-            </AnimatePresence>
-          </div>
+            {/* Toggle Button */}
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="absolute -right-3 top-1 z-10 bg-gray-700 hover:bg-gray-600 text-white p-1 rounded-full border border-gray-600 transition-colors" // Reduced top position
+            >
+              {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            </button>
 
-          <form
-            onSubmit={handleSubmit}
-            className="fixed bottom-0 left-0 right-0 p-6 z-50"
-          >
-            <div className="max-w-[1200px] mx-auto relative">
-              <div className="absolute inset-0 bg-white/80 backdrop-blur-lg rounded-2xl shadow-lg shadow-cyan-300/10 -z-10 border-2 border-blue-100/40" />
-              <div className="relative flex items-end">
-                <div className="relative flex-1">
-                  <Textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSubmit(e);
-                      }
-                    }}
-                    placeholder="Type your message here…"
-                    className="min-h-[100px] p-4 pr-24 rounded-xl resize-none bg-white/60 border-fuchsia-200 focus:border-fuchsia-500 focus:ring-blue-500 font-semibold text-lg"
-                  />
-                  <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                    <div className="relative">
-                      <Button
-                        type="button"
-                        onClick={recording ? stopRecording : startRecording}
-                        disabled={isTranscribing}
-                        variant="ghost"
-                        size="icon"
-                        className={`h-9 w-9 rounded-lg transition-colors ${
-                          recording
-                            ? "text-red-500 bg-red-50 hover:bg-red-100"
-                            : "text-blue-600 hover:bg-blue-50"
-                        }`}
-                      >
-                        {recording ? (
-                          <StopIcon className="h-5 w-5" />
-                        ) : isTranscribing ? (
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                        ) : (
-                          <MicrophoneIcon className="h-5 w-5" />
-                        )}
-                      </Button>
-                      {isTranscribing && (
-                        <motion.div
-                          className="absolute inset-0 rounded-lg border border-blue-400/50"
-                          animate={{ opacity: [0.5, 1] }}
-                          transition={{
-                            duration: 1,
-                            repeat: Number.POSITIVE_INFINITY,
-                            repeatType: "reverse",
-                            ease: "easeInOut",
-                          }}
-                        />
-                      )}
+            {/* Sidebar Content - Compact */}
+            <div className="p-2 border-b border-gray-700/50"> {/* Reduced padding */}
+              <div className={`flex items-center justify-between mb-2 ${sidebarCollapsed ? 'justify-center' : ''}`}>
+                {!sidebarCollapsed && (
+                  <h2 className="text-base font-semibold text-white">Learning Hub</h2> 
+                )}
+                {sidebarCollapsed && (
+                  <Menu size={18} className="text-gray-400" />
+                )}
+              </div>
+              
+              {/* User Profile - Compact */}
+              <div className={`flex items-center space-x-2 p-2 bg-gray-700/30 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}>
+                <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User size={12} />
+                </div>
+                {!sidebarCollapsed && (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-white truncate">
+                        {user?.firstName || 'Learner'}
+                      </p>
+                      <p className="text-xs text-gray-400">🎯 Level Up Mode</p>
                     </div>
-                    <Button
-                      type="submit"
-                      variant="ghost"
-                      size="icon"
-                      disabled={!input.trim() || isLoading}
-                      className={`h-9 w-9 rounded-lg transition-colors ${
-                        input.trim()
-                          ? "text-fuchsia-600 hover:bg-fuchsia-50"
-                          : "text-gray-400"
-                      }`}
-                    >
-                      <PaperAirplaneIcon className="h-5 w-5" />
-                    </Button>
-                  </div>
+                    <SignOutButton>
+                      <button className="text-gray-400 hover:text-red-400 transition-colors">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                      </button>
+                    </SignOutButton>
+                  </>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col">
+          {/* Chat Header - Reduced padding */}
+          <div className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700/50 p-2"> {/* Reduced padding */}
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => router.push('/learn')}
+                className="flex items-center space-x-2 text-gray-400 hover:text-white transition-colors"
+              >
+                <ArrowLeft size={16} />
+                <span className="text-sm">Back to Learning</span>
+              </button>
+              
+              <div className="flex items-center space-x-2">
+                <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                  <Bot size={14} />
+                </div>
+                <div>
+                  <h1 className="text-base font-semibold text-white">AI Learning Companion</h1>
+                  <p className="text-xs text-gray-400">🚀 Visual Learning Experience!</p>
                 </div>
               </div>
             </div>
-          </form>
-        </div>
-      </motion.div>
-      <audio ref={audioRef} className="hidden" />
-      <style jsx global>{`
-        body {
-          background: radial-gradient(ellipse at 60% 20%, #e8eafe 60%, #f7e8fc 100%);
-        }
-        .prose h2 {
-          font-size: 2rem !important;
-          color: #4f5eff;
-          font-weight: 700;
-          letter-spacing: -0.02em;
-        }
-        .prose li {
-          color: #2a2657;
-          font-size: 1.1rem;
-        }
-        .prose img {
-          box-shadow: 0 2px 16px #e8eafe80;
-        }
-        .messages-container::-webkit-scrollbar-thumb {
-          background: #e8eafe;
-        }
-      `}</style>
-    </div>
-  );
-};
+          </div>
 
-// === QUIZ UI COMPONENT ===
-function QuizUI({
-  quiz,
-  messageIdx,
-  onSelect,
-  onReveal,
-  onLearnMore,
-  onNewChat,
-}: {
-  quiz: QuizBlock;
-  messageIdx: number;
-  onSelect: (
-    messageIdx: number,
-    questionIdx: number,
-    selected: string
-  ) => void;
-  onReveal: (messageIdx: number) => void;
-  onLearnMore: (quiz: QuizBlock) => void;
-  onNewChat: () => void;
-}) {
-  if (
-    quiz.questions.length === 1 &&
-    quiz.questions[0].question_text === "Could not generate proper questions."
-  ) {
-    return (
-      <div className="text-pink-700 font-bold text-center">
-        Sorry, quiz could not be generated for this topic.<br />
-        Try rephrasing or choose another subject.
-      </div>
-    );
-  }
-  return (
-    <div>
-      <div className="font-bold text-lg mb-2">Quiz</div>
-      {quiz.questions.map((q, qi) => (
-        <div key={qi} className="mb-5">
-          <div className="font-medium mb-1">{qi + 1}. {q.question_text}</div>
-          {q.diagram && (
-            <ReactMarkdown
-              components={{
-                img: ({ ...props }) => (
-                  <img
-                    {...props}
-                    className="mx-auto my-4 rounded-xl border-2 border-fuchsia-200/40 shadow-2xl animate-fadeIn"
-                    style={{ maxHeight: 180, objectFit: "contain" }}
-                  />
-                ),
-                p: ({ children }) => (
-                  <p className="my-2">{children}</p>
-                ),
-              }}
-            >
-              {q.diagram}
-            </ReactMarkdown>
-          )}
-          <ul className="flex flex-col gap-2 mb-2">
-            {q.options.map((opt, oi) => {
-              const selected = quiz.userAnswers[qi] === opt;
-              const correct = quiz.showResults && opt === q.correct_answer;
-              const wrong =
-                quiz.showResults && selected && !correct;
-              return (
-                <li key={oi}>
-                  <button
-                    className={[
-                      "w-full text-left px-4 py-2 rounded-lg border transition",
-                      selected
-                        ? "bg-[#e7e9fd] border-[#7a5cfa]"
-                        : "bg-white/70 border-[#d4d1fd]",
-                      correct
-                        ? "bg-green-500/80 border-green-700 font-bold text-white"
-                        : "",
-                      wrong ? "bg-red-500/80 border-red-600 font-medium text-white" : "",
-                      "hover:bg-[#e8eafe]"
-                    ].join(" ")}
-                    disabled={quiz.showResults}
-                    onClick={() => onSelect(messageIdx, qi, opt)}
-                  >
-                    {opt}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          {quiz.showResults && (
-            <div
-              className={
-                quiz.results[qi]
-                  ? "text-green-700 font-semibold"
-                  : "text-red-700 font-semibold"
-              }
-            >
-              {quiz.results[qi]
-                ? "Correct!"
-                : (
-                  <>
-                    Incorrect. Correct answer: <b>{q.correct_answer}</b>
-                    <div className="text-gray-600 text-sm mt-1">
-                      <ReactMarkdown>{q.explanation}</ReactMarkdown>
+          {/* Messages Area - Compact */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-2"> {/* Reduced padding */}
+            <div className="max-w-4xl mx-auto">
+              {messages.length === 0 ? (
+                <div className="text-center py-6"> {/* Reduced padding */}
+                  <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Bot size={24} />
+                  </div>
+                  <h3 className="text-lg font-semibold text-white mb-2">🎯 Ready for Visual Learning?</h3>
+                  <p className="text-gray-400 mb-4">Ask me anything and get diagrams + images!</p>
+                  
+                  {/* Quick Start Examples - Compact */}
+                  <div className="grid grid-cols-2 gap-3 max-w-2xl mx-auto">
+                    {[
+                      { emoji: "🔬", title: "Science", prompt: "Explain photosynthesis with diagrams" },
+                      { emoji: "💻", title: "Programming", prompt: "Show me how React works with architecture" },
+                      { emoji: "📊", title: "Math", prompt: "Visualize calculus concepts" },
+                      { emoji: "🏛️", title: "History", prompt: "Ancient Rome architecture and culture" }
+                    ].map((example, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setInputValue(example.prompt)}
+                        className="bg-gray-800/50 hover:bg-gray-700/50 p-3 rounded-lg border border-gray-600 transition-all hover:scale-105 text-left"
+                      >
+                        <div className="text-xl mb-1">{example.emoji}</div>
+                        <div className="text-white font-medium text-sm">{example.title}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                messages.map((message) => (
+                  <EnhancedMessageWithVisuals key={message.id} message={message} />
+                ))
+              )}
+
+              {/* Loading indicator */}
+              {isLoading && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex justify-start"
+                >
+                  <div className="flex space-x-3 max-w-3xl">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-green-500 flex items-center justify-center">
+                      <Bot size={16} />
                     </div>
-                  </>
-                )
-              }
+                    <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-4">
+                      <div className="flex space-x-2 mb-2">
+                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                        <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      </div>
+                      <p className="text-xs text-gray-400">🧠 Creating diagrams & finding visuals...</p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              <div ref={messagesEndRef} />
             </div>
-          )}
+          </div>
+
+          {/* Input Area - Compact */}
+          <div className="border-t border-gray-700/50 bg-gray-800/30 backdrop-blur-sm p-2"> {/* Reduced padding */}
+            <div className="max-w-4xl mx-auto">
+              <div className="flex space-x-2"> {/* Reduced gap */}
+                <textarea
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="🎯 Ask for diagrams and visual explanations..."
+                  className="flex-1 bg-gray-700/50 border border-gray-600/50 rounded-lg px-3 py-2 text-white placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors text-sm" // Reduced text size
+                  rows={1}
+                  disabled={isLoading || isSending}
+                />
+                <button
+                  onClick={() => handleSubmit()}
+                  disabled={!inputValue.trim() || isLoading || isSending}
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-lg transition-all hover:scale-105 flex items-center justify-center min-w-[45px]" // Reduced size
+                >
+                  <Send size={12} /> {/* Reduced icon size */}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      ))}
-      {!quiz.showResults && quiz.showButton && (
-        <Button
-          className="mt-2 bg-gradient-to-r from-[#4f5eff] to-[#7a5cfa] text-white font-semibold text-base"
-          onClick={() => onReveal(messageIdx)}
-        >
-          Show Correct Answers
-        </Button>
-      )}
-      <div className="text-xs text-gray-400 mt-2">
-        (Select an answer for each question, then click "Show Correct Answers")
       </div>
-      {quiz.showResults && (
-        <div className="flex gap-4 mt-6 justify-center">
-          <Button
-            className="bg-gradient-to-r from-[#4f5eff] to-[#7a5cfa] text-white px-6"
-            onClick={() => onLearnMore(quiz)}
-          >
-            Learn More with Quizzes
-          </Button>
-          <Button
-            className="bg-gradient-to-r from-gray-200 to-gray-400 px-6"
-            onClick={onNewChat}
-          >
-            New Chat
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
 
-export default Chat;
+// Enhanced Message Component with Architecture Diagrams and Images
+const EnhancedMessageWithVisuals = ({ message }: { message: Message }) => {
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-3`}
+    >
+      <div className={`flex space-x-3 max-w-4xl ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+        {/* Avatar */}
+        <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+          message.sender === 'user' 
+            ? 'bg-gradient-to-br from-purple-500 to-blue-500' 
+            : 'bg-gradient-to-br from-blue-500 to-green-500'
+        }`}>
+          {message.sender === 'user' ? <User size={16} /> : <Bot size={16} />}
+        </div>
+
+        {/* Message Content */}
+        <div className={`flex-1 rounded-2xl p-4 ${
+          message.sender === 'user'
+            ? 'bg-gradient-to-br from-purple-600 to-blue-600 text-white'
+            : 'bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 text-gray-100'
+        }`}>
+          {message.sender === 'ai' ? (
+            <div>
+              <div className="prose prose-invert max-w-none">
+                <ReactMarkdown>
+                  {message.content}
+                </ReactMarkdown>
+              </div>
+              
+              {/* Related Topic Image at Bottom */}
+              {message.imageUrl && (
+  <div className="mt-4 p-3 bg-gradient-to-r from-gray-700/20 to-gray-600/20 rounded-lg border border-gray-600/30">
+    <div className="flex items-center space-x-2 mb-2">
+      <ImageIcon className="text-blue-400" size={16} />
+      <span className="text-sm font-medium text-blue-300">Visual Learning Aid</span>
+    </div>
+    <img 
+      src={message.imageUrl} // <- This displays your Unsplash image
+      alt={`Visual representation of ${message.topic || 'topic'}`}
+      className="w-full rounded-lg shadow-lg hover:scale-105 transition-transform cursor-pointer"
+      loading="lazy"
+      onError={(e) => {
+        // Fallback if image fails to load
+        e.currentTarget.style.display = 'none';
+      }}
+    />
+    <p className="text-xs text-gray-400 mt-2 text-center">
+      🔍 Related to: {message.topic || 'Current Topic'}
+    </p>
+  </div>
+)}
+
+              {/* Gamification Elements */}
+              {message.pointsEarned && (
+                <div className="mt-4 p-3 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-lg border border-yellow-500/30">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Star className="text-yellow-400" size={16} />
+                      <span className="text-yellow-400 font-semibold">+{message.pointsEarned} XP Earned!</span>
+                    </div>
+                    <div className="flex items-center space-x-1">
+                      <Zap className="text-blue-400" size={14} />
+                      <span className="text-xs text-gray-300">Visual Learning Bonus</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Achievement Badges */}
+              {message.achievements && message.achievements.length > 0 && (
+                <div className="mt-3">
+                  <div className="flex flex-wrap gap-2">
+                    {message.achievements.map((achievement, idx) => (
+                      <div key={idx} className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 px-3 py-1 rounded-full border border-purple-500/30">
+                        <div className="flex items-center space-x-1">
+                          <Trophy size={12} className="text-purple-400" />
+                          <span className="text-xs font-medium text-purple-300">{achievement}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          )}
+          
+          <div className="mt-2 text-xs opacity-70">
+            {message.timestamp.toLocaleTimeString()}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+// Generate enhanced response with architecture diagrams and comprehensive content
+const generateEnhancedResponse = async (input: string, baseResponse: string) => {
+  const topics = ['science', 'programming', 'math', 'history', 'architecture', 'design', 'business'];
+  const topic = topics.find(t => input.toLowerCase().includes(t)) || extractTopicFromInput(input);
+  
+  const basePointsEarned = Math.floor(Math.random() * 50) + 30;
+  const achievements = [];
+  
+  // Add contextual achievements
+  if (input.length > 50) achievements.push('Detail-Oriented Questioner');
+  if (input.includes('?')) achievements.push('Curious Explorer');
+  if (input.includes('diagram') || input.includes('visual')) achievements.push('Visual Learner');
+  if (topic !== 'general') achievements.push(`${topic.charAt(0).toUpperCase() + topic.slice(1)} Enthusiast`);
+  
+  const architectureDiagram = generateArchitectureDiagram(topic, input);
+  
+  const enhancedContent = `# 🎯 ${getEngagingTitle(topic, input)}
+
+${architectureDiagram}
+
+## 🚀 Comprehensive Learning Experience
+
+${baseResponse}
+
+### 🎮 **Interactive Challenge Unlocked!**
+- **Difficulty Level**: ${getDifficultyLevel(input)}
+- **Knowledge Points**: +${basePointsEarned} XP
+- **Visual Elements**: Diagram + Topic Image included
+- **Next Milestone**: ${getNextMilestone(topic)}
+
+### 🧠 **Deep Dive Insights**
+${generateDeepInsights(input, topic)}
+
+### 🔥 **Pro Learning Tips**
+${generateProTips(topic)}
+
+### 🎯 **Practice Challenge**
+${generatePracticeChallenge(topic, input)}
+
+---
+*🏆 Visual learning activated! Check the architecture diagram above and topic image below for enhanced understanding.*`;
+
+  return {
+    content: enhancedContent,
+    topic: topic,
+    pointsEarned: basePointsEarned,
+    achievements: achievements
+  };
+};
+
+// Generate ASCII architecture diagrams based on topic
+const generateArchitectureDiagram = (topic: string, input: string) => {
+  const diagrams = {
+    programming: `
+## 📐 **Architecture Overview: React Component Flow**
+
+\`\`\`
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   User Input    │───▶│  State Manager  │───▶│   UI Renderer   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Event Handler │    │   Props Flow    │    │   DOM Updates   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+\`\`\`
+`,
+    science: `
+## 🔬 **Scientific Process Diagram**
+
+\`\`\`
+    ┌──────────────┐
+    │  Observation │
+    └──────┬───────┘
+           │
+    ┌──────▼───────┐
+    │  Hypothesis  │
+    └──────┬───────┘
+           │
+    ┌──────▼───────┐     ┌─────────────┐
+    │ Experiment   │────▶│   Analysis  │
+    └──────────────┘     └─────┬───────┘
+                                │
+                         ┌──────▼───────┐
+                         │  Conclusion  │
+                         └──────────────┘
+\`\`\`
+`,
+    math: `
+## 📊 **Mathematical Concept Map**
+
+\`\`\`
+           ┌─────────────┐
+           │   Problem   │
+           └──────┬──────┘
+                  │
+      ┌───────────┼───────────┐
+      │           │           │
+┌─────▼─────┐ ┌───▼────┐ ┌───▼────┐
+│  Method 1 │ │Method 2│ │Method 3│
+└─────┬─────┘ └───┬────┘ └───┬────┘
+      │           │           │
+      └───────────┼───────────┘
+                  │
+           ┌──────▼──────┐
+           │  Solution   │
+           └─────────────┘
+\`\`\`
+`,
+    history: `
+## 🏛️ **Historical Timeline Structure**
+
+\`\`\`
+Past ←─────────────────────────────────────→ Present
+  │                   │                   │
+┌─▼─┐               ┌─▼─┐               ┌─▼─┐
+│Era│               │Era│               │Era│
+│ 1 │──────────────▶│ 2 │──────────────▶│ 3 │
+└───┘               └───┘               └───┘
+  │                   │                   │
+  ▼                   ▼                   ▼
+Events              Events              Events
+Causes              Causes              Causes
+Effects             Effects             Effects
+\`\`\`
+`,
+    general: `
+## 🎯 **Learning Framework**
+
+\`\`\`
+     ┌─────────────┐
+     │   QUESTION  │
+     └──────┬──────┘
+            │
+    ┌───────▼───────┐
+    │   RESEARCH    │
+    └───────┬───────┘
+            │
+    ┌───────▼───────┐
+    │   ANALYZE     │
+    └───────┬───────┘
+            │
+    ┌───────▼───────┐
+    │   UNDERSTAND  │
+    └───────┬───────┘
+            │
+    ┌───────▼───────┐
+    │    APPLY      │
+    └───────────────┘
+\`\`\`
+`
+  };
+  
+  return diagrams[topic] || diagrams.general;
+};
+
+// Helper functions for engaging content
+const extractTopicFromInput = (input: string): string => {
+  const keywords = {
+    'react': 'programming',
+    'javascript': 'programming',
+    'python': 'programming',
+    'photosynthesis': 'science',
+    'biology': 'science',
+    'chemistry': 'science',
+    'calculus': 'math',
+    'algebra': 'math',
+    'rome': 'history',
+    'war': 'history',
+    'design': 'design',
+    'business': 'business'
+  };
+  
+  const lowerInput = input.toLowerCase();
+  for (const [keyword, topic] of Object.entries(keywords)) {
+    if (lowerInput.includes(keyword)) return topic;
+  }
+  return 'general';
+};
+
+const getEngagingTitle = (topic: string, input: string) => {
+  const titles = {
+    science: 'Scientific Discovery Mission',
+    programming: 'Code Architecture Quest',
+    math: 'Mathematical Exploration',
+    history: 'Time Travel Journey',
+    design: 'Creative Design Workshop',
+    business: 'Strategic Business Analysis',
+    general: 'Knowledge Discovery Adventure'
+  };
+  return titles[topic] || titles.general;
+};
+
+const getDifficultyLevel = (input: string) => {
+  if (input.includes('basic') || input.includes('simple') || input.includes('intro')) return '🟢 Beginner';
+  if (input.includes('advanced') || input.includes('complex') || input.includes('deep')) return '🔴 Expert';
+  return '🟡 Intermediate';
+};
+
+const getNextMilestone = (topic: string) => {
+  const milestones = {
+    science: 'Unlock "Lab Master" badge at 500 XP',
+    programming: 'Achieve "Code Architect" status at 750 XP',
+    math: 'Reach "Number Wizard" level at 600 XP',
+    history: 'Become a "Time Guardian" at 550 XP',
+    design: 'Unlock "Creative Genius" at 650 XP',
+    business: 'Reach "Strategy Expert" at 700 XP',
+    general: 'Achieve "Knowledge Master" rank at 400 XP'
+  };
+  return milestones[topic] || milestones.general;
+};
+
+const generateDeepInsights = (input: string, topic: string) => {
+  return `💡 **Key Connections**: This concept links to ${getRelatedConcepts(topic)}
+  
+🔗 **Real-World Applications**: See how this applies in ${getRealWorldExamples(topic)}
+  
+🚀 **Future Implications**: This knowledge opens doors to ${getFutureApplications(topic)}`;
+};
+
+const generateProTips = (topic: string) => {
+  const tips = {
+    science: '🔬 Connect theories to experiments\n🌍 Look for patterns in nature\n📊 Use visual models and simulations',
+    programming: '💻 Practice with real projects\n🔍 Debug systematically\n🚀 Learn by building, not just reading',
+    math: '📐 Visualize abstract concepts\n🔢 Practice mental calculations\n📊 Apply to real-world problems',
+    history: '📚 Connect events chronologically\n🗺️ Study maps and timelines\n🎭 Understand human motivations',
+    design: '🎨 Study great examples\n✏️ Sketch ideas quickly\n👥 Get feedback early and often',
+    business: '📈 Analyze market trends\n💼 Study successful case studies\n🤝 Network with industry experts',
+    general: '🧠 Ask deeper "why" questions\n📝 Take visual notes\n🔄 Teach others to solidify understanding'
+  };
+  return tips[topic] || tips.general;
+};
+
+const generatePracticeChallenge = (topic: string, input: string) => {
+  return `🎯 **Your Challenge**: Try to explain this concept to someone else in under 2 minutes
+  
+🧩 **Bonus Task**: Find 3 real-world examples of this concept in action
+  
+🔄 **Reflection**: How does this connect to something you learned before?`;
+};
+
+const getRelatedConcepts = (topic: string) => {
+  const concepts = {
+    science: 'physics, chemistry, and environmental science',
+    programming: 'algorithms, data structures, and system design',
+    math: 'statistics, geometry, and applied mathematics',
+    history: 'sociology, politics, and cultural studies',
+    design: 'psychology, art theory, and user experience',
+    business: 'economics, marketing, and organizational behavior',
+    general: 'critical thinking, problem-solving, and analytical reasoning'
+  };
+  return concepts[topic] || concepts.general;
+};
+
+const getRealWorldExamples = (topic: string) => {
+  const examples = {
+    science: 'medicine, technology, and environmental solutions',
+    programming: 'web development, mobile apps, and AI systems',
+    math: 'finance, engineering, and data analysis',
+    history: 'current politics, social movements, and cultural trends',
+    design: 'user interfaces, marketing, and product development',
+    business: 'startups, corporate strategy, and market analysis',
+    general: 'daily decision-making and problem-solving'
+  };
+  return examples[topic] || examples.general;
+};
+
+const getFutureApplications = (topic: string) => {
+  const applications = {
+    science: 'breakthrough research, innovation, and discovery',
+    programming: 'advanced software engineering and system architecture',
+    math: 'data science, machine learning, and quantitative analysis',
+    history: 'understanding future trends and making informed decisions',
+    design: 'creative leadership and innovative product development',
+    business: 'strategic planning and entrepreneurial ventures',
+    general: 'lifelong learning and intellectual growth'
+  };
+  return applications[topic] || applications.general;
+};

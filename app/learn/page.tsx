@@ -11,6 +11,8 @@ import { cn } from "@/lib/utils";
 import Navbar from "@/components/custom/navbar";
 import { UploadClient } from "@uploadcare/upload-client";
 import { useRouter } from "next/navigation";
+import PDFUploader from '../components/PDFUploader'; 
+
 
 const client = new UploadClient({
   publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUBLIC_KEY!,
@@ -261,246 +263,247 @@ export default function UploadModule() {
     <>
       <Navbar loggedIn={true} />
 
-      <AnimatePresence>
-        {showAllConversations && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50"
-            onClick={() => setShowAllConversations(false)}
-          >
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="absolute inset-x-0 bottom-0 bg-white rounded-t-[2.5rem] p-8 min-h-[80vh] shadow-xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="max-w-6xl mx-auto">
-                <div className="flex items-center justify-between mb-8">
-                  <div className="flex items-center gap-3">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowAllConversations(false)}
-                      className="rounded-full"
-                    >
-                      <ArrowLeft className="h-6 w-6" />
-                    </Button>
-                    <h2 className="text-3xl font-bold">All Conversations</h2>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  {recentChats.length === 0 && (
-                    <div className="text-center text-gray-500 text-lg py-8">
-                      No conversations yet.
-                    </div>
-                  )}
-                  {recentChats.map((conv) => (
-                    <motion.div
-                      key={conv.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 20 }}
-                      className="group relative rounded-2xl bg-gradient-to-tr from-gray-50 to-blue-50 p-6 hover:shadow-lg transition-all"
-                      whileHover={{ scale: 1.01 }}
-                      whileTap={{ scale: 0.99 }}
-                    >
-                      <div className={cn("absolute inset-0 rounded-2xl bg-gradient-to-r", conv.color)} />
-                      <div className="relative flex items-center gap-6">
-                        <div className="h-16 w-16 rounded-xl bg-white/80 backdrop-blur-sm flex items-center justify-center text-3xl flex-shrink-0">
-                          {conv.icon}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="text-xl font-medium text-gray-900">{conv.title}</h3>
-                            <span className="text-sm text-gray-500">{conv.timestamp}</span>
-                          </div>
-                          <p className="text-gray-600 mb-3">{conv.description}</p>
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-gray-600">Progress</span>
-                              <span className="font-medium text-gray-900">{conv.progress}%</span>
-                            </div>
-                            <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                              <motion.div
-                                className="h-full bg-gradient-to-r from-blue-600 to-violet-600"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${conv.progress}%` }}
-                                transition={{ duration: 1, ease: "easeOut" }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div className="min-h-screen bg-gradient-to-b from-[#fafafa] to-blue-50/30 px-4">
-        <motion.div
-          className="container mx-auto max-w-4xl pt-24 pb-12 space-y-16"
-          initial="initial"
-          animate="animate"
-          variants={{
-            animate: {
-              transition: {
-                staggerChildren: 0.2,
-              },
-            },
-          }}
+      {/* <AnimatePresence> */}
+         {showAllConversations && (
+  <div 
+    className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+    onClick={() => setShowAllConversations(false)}
+  >
+    <div 
+      className="bg-gray-900 rounded-xl p-6 max-w-4xl w-full max-h-[80vh] overflow-y-auto border border-gray-700"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-bold text-white">All Conversations</h2>
+        <button
+          onClick={() => setShowAllConversations(false)}
+          className="text-gray-400 hover:text-white text-2xl"
         >
-          <motion.div
-            variants={scaleIn}
-            className="bg-white rounded-[2.5rem] p-8 md:p-12 shadow-xl shadow-blue-100/50 relative"
-          >
-            <div className="space-y-12">
-              <div className="text-center">
-                <h1 className="text-4xl md:text-5xl font-bold">
-                  <span className="text-gray-900">What would you like to</span>
-                  <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-violet-600"> learn?</span>
-                </h1>
-              </div>
-              <div className="space-y-6">
-                <div className="relative"
-                  onDragOver={onDragOver}
-                  onDragLeave={onDragLeave}
-                  onDrop={onDrop}
-                >
-                  <Textarea
-                    placeholder="For example: 'Explain quantum computing basics' or 'Help me understand machine learning concepts'"
-                    className="w-full text-lg md:text-xl bg-gray-50/50 rounded-2xl p-6 min-h-[160px] resize-none border border-gray-100 focus:border-blue-200 focus:ring-blue-100 placeholder:text-gray-400"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                  />
-                  {isDragging && (
-                    <div className="absolute inset-0 rounded-2xl border-2 border-dashed border-blue-400 bg-blue-50/50 backdrop-blur-[1px] flex items-center justify-center">
-                      <div className="text-center">
-                        <Upload className="h-8 w-8 text-blue-600 mx-auto mb-2" />
-                        <p className="text-blue-600 font-medium">Drop your files here</p>
-                      </div>
-                    </div>
-                  )}
-                  <div className="absolute bottom-4 right-4 flex items-center gap-3">
-                    <div
-                      className={cn(
-                        "flex items-center gap-2 bg-white/80 backdrop-blur-sm border border-gray-200 rounded-lg px-4 py-2 cursor-pointer transition-all duration-200 hover:border-blue-400 hover:bg-blue-50/50 group",
-                        uploading && "opacity-50 pointer-events-none"
-                      )}
-                    >
-                      <input
-                        type="file"
-                        onChange={onFileSelect}
-                        accept=".pdf,.ppt,.pptx,.mp4"
-                        multiple
-                        className="hidden"
-                        id="file-upload"
-                      />
-                      <label
-                        htmlFor="file-upload"
-                        className="flex items-center gap-2 cursor-pointer text-sm"
-                      >
-                        <Upload className="h-4 w-4 text-blue-600 group-hover:scale-110 transition-transform" />
-                        <span className="text-gray-600">Upload</span>
-                      </label>
-                    </div>
-                    <Button
-                      onClick={handleSubmit}
-                      className="bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 px-6 py-2 text-base rounded-lg shadow-lg shadow-blue-600/20"
-                      disabled={uploading}
-                    >
-                      <motion.div
-                        className="flex items-center gap-2"
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Sparkles className="w-4 h-4" />
-                        Let's explore
-                      </motion.div>
-                    </Button>
+          ×
+        </button>
+      </div>
+
+      {recentChats.length === 0 && (
+        <p className="text-center text-gray-400 py-8">No conversations yet.</p>
+      )}
+
+      <div className="space-y-4">
+        {recentChats.map((conv) => (
+  <div 
+    key={conv.id} 
+    className="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-purple-500/50 transition-colors cursor-pointer group"
+    onClick={() => {
+      const prompt = conv.title.replace('...', '');
+      setShowAllConversations(false);
+      router.push(`/learn/chat?prompt=${encodeURIComponent(prompt)}`);
+    }}
+  >
+            <div className="flex items-start space-x-3">
+              <div className="text-2xl group-hover:scale-110 transition-transform">{conv.icon}</div>
+              <div className="flex-1">
+                <h3 className="text-white font-semibold group-hover:text-purple-300 transition-colors">
+                  {conv.title}
+                </h3>
+                <p className="text-sm text-gray-400 mt-1">{conv.timestamp}</p>
+                <p className="text-gray-300 text-sm mt-2">{conv.description}</p>
+                
+                <div className="mt-3">
+                  <div className="flex justify-between text-xs text-gray-400 mb-1">
+                    <span>Progress</span>
+                    <span>{conv.progress}%</span>
+                  </div>
+                  <div className="w-full bg-gray-700 rounded-full h-2">
+                    <div 
+                      className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full group-hover:from-purple-400 group-hover:to-blue-400 transition-colors" 
+                      style={{ width: `${conv.progress}%` }}
+                    ></div>
                   </div>
                 </div>
-                {uploadedFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {uploadedFiles.map((file, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-2 bg-white border border-gray-100 rounded-lg px-3 py-1.5 text-sm shadow-sm"
-                      >
-                        <FileText className="h-4 w-4 text-blue-600" />
-                        <span className="text-gray-600 truncate max-w-[200px]">
-                          {file.name}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
-            <AnimatePresence>
-              {uploading && (
-                <motion.div
-                  className="absolute inset-0 bg-white/80 backdrop-blur-sm rounded-[2.5rem] flex items-center justify-center"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                >
-                  <div className="text-center space-y-4">
-                    <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto" />
-                    <p className="text-lg font-medium text-gray-900">
-                      Processing your content...
-                    </p>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+)}
 
-          {recentChats.length > 0 && (
-            <motion.div
-              variants={scaleIn}
-              className="space-y-6"
+      {/* Main Content */}
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white pt-24">
+        <div className="container mx-auto px-4 py-8 pt-30">
+          {/* Title Section */}
+          <div className="text-center mb-12">
+            <h1 className="text-4xl md:text-5xl font-bold mb-4">
+              What would you like to{" "}
+              <span className="bg-gradient-to-r from-blue-500 to-purple-600 bg-clip-text text-transparent">
+                learn?
+              </span>
+            </h1>
+            <p className="text-gray-400 text-lg max-w-2xl mx-auto">
+              For example: 'Explain quantum computing basics' or 'Help me understand machine learning concepts'
+            </p>
+          </div>
+
+          {/* Input Section */}
+          <div className="max-w-4xl mx-auto mb-8">
+            <div
+              className={`relative border-2 border-dashed rounded-2xl p-8 transition-all ${
+                isDragging
+                  ? "border-blue-500 bg-blue-500/10"
+                  : "border-gray-600 hover:border-gray-500"
+              }`}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
             >
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Recent Learning</h2>
-                <Button 
-                  variant="ghost" 
-                  className="text-blue-600"
-                  onClick={() => setShowAllConversations(true)}
-                >
-                  View All
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {recentChats.map((conv) => (
-                  <motion.div
-                    key={conv.id}
-                    className="group relative rounded-2xl bg-gradient-to-tr from-gray-50 to-blue-50 p-6 hover:shadow-lg transition-all"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <div className={cn("absolute inset-0 rounded-2xl bg-gradient-to-r", conv.color)} />
-                    <div className="relative flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-xl bg-white/80 backdrop-blur-sm flex items-center justify-center text-2xl flex-shrink-0">
-                        {conv.icon}
-                      </div>
-                      <div>
-                        <h3 className="font-medium text-gray-900 line-clamp-1">{conv.title}</h3>
-                        <p className="text-sm text-gray-500">{conv.timestamp}</p>
-                      </div>
-                    </div>
-                  </motion.div>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Ask me anything or describe what you want to learn..."
+                className="w-full bg-transparent text-white placeholder-gray-400 text-lg resize-none focus:outline-none min-h-[120px]"
+                rows={4}
+              />
+
+              {isDragging && (
+                <div className="absolute inset-0 flex items-center justify-center bg-blue-500/20 rounded-2xl">
+                  <p className="text-blue-400 font-semibold text-xl">Drop your files here</p>
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-4 mt-6">
+              <label className="flex-1">
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf"
+                  onChange={onFileSelect}
+                  className="hidden"
+                />
+                <PDFUploader />
+
+              </label>
+
+              <button
+                onClick={handleSubmit}
+                disabled={uploading || (!notes.trim() && uploadedFiles.length === 0)}
+                className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 text-white py-3 px-6 rounded-lg transition-all disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 className="animate-spin" size={20} />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={20} />
+                    <span>Let's explore</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Uploaded Files */}
+          {uploadedFiles.length > 0 && (
+            <div className="max-w-4xl mx-auto mb-8">
+              <h3 className="text-lg font-semibold mb-4 text-white">Uploaded Files:</h3>
+              <div className="space-y-2">
+                {uploadedFiles.map((file, index) => (
+                  <div key={index} className="flex items-center space-x-3 bg-gray-800 p-3 rounded-lg border border-gray-700">
+                    <FileText className="text-blue-400" size={20} />
+                    <span className="text-gray-300">{file.name}</span>
+                  </div>
                 ))}
               </div>
-            </motion.div>
+            </div>
           )}
+
+          {/* Recent Learning Section */}
+          {recentChats.length > 0 && (
+  <div className="max-w-4xl mx-auto mb-8">
+    <div className="flex justify-between items-center mb-6">
+      <h2 className="text-2xl font-bold text-white">Recent Learning</h2>
+      <button
+        onClick={() => setShowAllConversations(true)}
+        className="text-purple-400 hover:text-purple-300 transition-colors"
+      >
+        View All
+      </button>
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {recentChats.map((conv) => (
+  <motion.div 
+    key={conv.id}
+    className="bg-gray-800/50 backdrop-blur-sm rounded-lg p-4 border border-gray-700/50 hover:border-purple-500/50 transition-colors cursor-pointer group"
+    onClick={() => {
+      // Navigate to chat with the original prompt
+      const prompt = conv.title.replace('...', ''); // Remove truncation
+      router.push(`/learn/chat?prompt=${encodeURIComponent(prompt)}`);
+    }}
+    whileHover={{ y: -2, scale: 1.02 }}
+    transition={{ duration: 0.2 }}
+        >
+          <div className="flex items-start space-x-3">
+            <div className="text-2xl group-hover:scale-110 transition-transform">
+              {conv.icon}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-white font-semibold truncate group-hover:text-purple-300 transition-colors">
+                {conv.title}
+              </h3>
+              <p className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
+                {conv.timestamp}
+              </p>
+              <p className="text-xs text-gray-500 mt-1 group-hover:text-purple-400 transition-colors">
+  Click to continue learning →
+</p>
+            </div>
+          </div>
+          
+          {/* Progress bar */}
+          <div className="mt-3">
+            <div className="w-full bg-gray-700 rounded-full h-1">
+              <div 
+                className="bg-gradient-to-r from-purple-500 to-blue-500 h-1 rounded-full group-hover:from-purple-400 group-hover:to-blue-400 transition-colors" 
+                style={{ width: `${conv.progress}%` }}
+              ></div>
+            </div>
+          </div>
         </motion.div>
+      ))}
+    </div>
+  </div>
+)}
+
+<div className="max-w-4xl mx-auto mt-8 mb-6 relative z-10">
+  <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+    <div className="flex justify-between items-center mb-3">
+      <span className="text-sm font-medium text-slate-300">Learning Progress</span>
+      <span className="text-sm font-medium text-purple-400">Level 1 - 45%</span>
+    </div>
+    
+    {/* Professional Progress Bar */}
+    <div className="w-full bg-slate-700 rounded-full h-3 overflow-hidden">
+      <div 
+        className="h-3 bg-gradient-to-r from-purple-500 to-blue-600 rounded-full transition-all duration-500 ease-out relative"
+        style={{ width: '45%' }}
+      >
+        {/* Animated shine effect */}
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse"></div>
+      </div>
+    </div>
+    
+    {/* Progress Details */}
+    <div className="mt-3 flex justify-between text-xs text-slate-400">
+      <span>45 XP earned</span>
+      <span>55 XP to Level 2</span>
+    </div>
+  </div>
+</div>
+        </div>
       </div>
     </>
   );
