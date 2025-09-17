@@ -7,17 +7,8 @@ import { toast } from 'sonner';
 import { Send, BookOpen, ArrowLeft, User, Bot, ChevronLeft, ChevronRight, Menu, Trophy, Target, Zap, Star, ImageIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
-
-interface Message {
-  id: number;
-  sender: 'user' | 'ai';
-  content: string;
-  timestamp: Date;
-  topic?: string;
-  imageUrl?: string;
-  pointsEarned?: number;
-  achievements?: string[];
-}
+import EnhancedMessageWithVisuals from '../../components/EnhancedMessageWithVisuals';
+import { Message } from '../../components/types';
 
 export default function EnhancedChatPage() {
   const { user } = useUser();
@@ -27,41 +18,9 @@ export default function EnhancedChatPage() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const submitTimeoutRef = useRef<NodeJS.Timeout>();
-
-  // Auto-scroll to bottom
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // Initialize with URL prompt
-  useEffect(() => {
-    const prompt = searchParams.get('prompt');
-    if (prompt && !isSending) {
-      setInputValue(prompt);
-      handleSubmit(prompt);
-    }
-  }, [searchParams]);
-
-  // Generate relevant image for topic
-  const generateTopicImage = async (topic: string): Promise<string | null> => {
-  try {
-    // Clean up topic for better image results
-    const cleanTopic = topic.toLowerCase()
-      .replace(/[^\w\s]/gi, '') // Remove special characters
-      .replace(/\s+/g, '+'); // Replace spaces with +
-    
-    // Unsplash Source API (free, no API key needed)
-    const unsplashUrl = `https://source.unsplash.com/800x600/?${encodeURIComponent(cleanTopic)}&auto=format&fit=crop&w=800&q=80`;
-    
-    return unsplashUrl;
-  } catch (error) {
-    console.error('Error generating topic image:', error);
-    return null;
-  }
-};
+  const submitTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Enhanced submit with architecture diagrams and images
   const handleSubmit = useCallback(async (customInput?: string) => {
@@ -96,28 +55,47 @@ export default function EnhancedChatPage() {
         })
       });
 
-      const data = await response.json();
+      // Debug: log response status
+      console.log('Backend response status:', response.status);
+      let data = null;
+      try {
+        data = await response.json();
+        console.log('Backend response JSON:', data);
+      } catch (jsonErr) {
+        console.error('Error parsing backend response JSON:', jsonErr);
+        toast.error('Error parsing backend response JSON');
+      }
 
-      if (data.status === 'success') {
+      if (data && data.status === 'success') {
         // Generate enhanced response with architecture diagram and image
         const enhancedResponse = await generateEnhancedResponse(input, data.response);
-        
-        // Generate topic image
-        const topicImage = await generateTopicImage(enhancedResponse.topic);
-        
+
+        // Generate image based on user prompt
+        // Use Unsplash API to search for an image
+        let imageUrl: string | undefined = undefined;
+        try {
+          const accessKey = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
+          const unsplashRes = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(input)}&per_page=1&client_id=${accessKey}`);
+          const unsplashData = await unsplashRes.json();
+          if (unsplashData.results && unsplashData.results.length > 0) {
+            imageUrl = unsplashData.results[0].urls.regular;
+          }
+        } catch (err) {
+          console.error('Unsplash API error:', err);
+        }
         const aiMessage: Message = {
           id: Date.now() + 1,
           sender: 'ai',
           content: enhancedResponse.content,
           timestamp: new Date(),
-          topic: enhancedResponse.topic,
-          imageUrl: topicImage || undefined,
+          topic: input,
+          imageUrl: imageUrl,
           pointsEarned: enhancedResponse.pointsEarned,
           achievements: enhancedResponse.achievements
         };
 
         setMessages(prev => [...prev, aiMessage]);
-        
+
         // Show achievement notifications
         if (enhancedResponse.achievements.length > 0) {
           enhancedResponse.achievements.forEach(achievement => {
@@ -130,6 +108,9 @@ export default function EnhancedChatPage() {
 
         // Update recent learning
         updateRecentLearning(input, enhancedResponse.content);
+      } else {
+        console.warn('Backend did not return success:', data);
+        toast.error('Backend did not return a successful response');
       }
     } catch (error) {
       console.error('Error:', error);
@@ -142,6 +123,55 @@ export default function EnhancedChatPage() {
       }, 1000);
     }
   }, [inputValue, isSending]);
+
+  // Auto-scroll to bottom with a small delay to ensure proper rendering
+  useEffect(() => {
+    const scrollTimeout = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+    return () => clearTimeout(scrollTimeout);
+  }, [messages]);
+
+  // Initialize with URL prompt (run only once)
+  const hasInitializedRef = useRef(false);
+  const hasProcessedPromptRef = useRef(false);
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
+    const prompt = searchParams.get('prompt');
+    if (prompt) {
+      setInputValue(prompt);
+      hasInitializedRef.current = true;
+    }
+  }, [searchParams]);
+
+  // Trigger handleSubmit after inputValue is set from URL prompt
+  useEffect(() => {
+    if (
+      hasInitializedRef.current &&
+      inputValue &&
+      !hasProcessedPromptRef.current
+    ) {
+      handleSubmit(inputValue);
+      hasProcessedPromptRef.current = true;
+    }
+    // Only run when inputValue changes after URL prompt
+  }, [inputValue, handleSubmit]);
+
+  // Generate relevant image for topic
+  const generatePromptImage = async (prompt: string): Promise<string | null> => {
+    try {
+      // Clean up prompt for better image results
+      const cleanPrompt = prompt.toLowerCase()
+        .replace(/[^\w\s]/gi, '') // Remove special characters
+        .replace(/\s+/g, ','); // Use comma for multi-keyword search
+      // Use basic Unsplash Source API format
+      const unsplashUrl = `https://source.unsplash.com/800x600/?${cleanPrompt}`;
+      return unsplashUrl;
+    } catch (error) {
+      console.error('Error generating prompt image:', error);
+      return null;
+    }
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -169,175 +199,206 @@ export default function EnhancedChatPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white pt-8">
-      <div className="flex h-[calc(100vh-2rem)]"> {/* Reduced height calculation */}
+    <div className="min-h-screen bg-[#1E1F23] text-white flex">
+      {/* Left Sidebar like ChatGPT */}
+      <div className="w-[260px] bg-[#131314] flex flex-col border-r border-gray-800 hidden md:block">
+        <div className="p-3 flex items-center space-x-2 border-b border-gray-800">
+          <div className="w-7 h-7 bg-gradient-to-br from-green-500 to-blue-500 rounded-full flex items-center justify-center">
+            <Bot size={16} />
+          </div>
+          <h1 className="text-base font-medium text-white">Learning Assistant</h1>
+        </div>
+        
+        <div className="p-3">
+          <button
+            onClick={() => router.push('/learn')}
+            className="w-full flex items-center space-x-2 py-2 px-3 bg-transparent hover:bg-gray-800 rounded-md text-gray-200 text-sm transition-colors"
+          >
+            <ArrowLeft size={15} />
+            <span>Back to Learning</span>
+          </button>
+        </div>
+        
+        <div className="p-3 border-t border-gray-800 mt-auto">
+          {user && (
+            <div className="flex items-center space-x-2">
+              <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center">
+                <User size={14} />
+              </div>
+              <span className="text-sm text-gray-300">{user.firstName || 'User'}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
         
         {/* Collapsible Sidebar */}
-        <AnimatePresence>
-          <motion.div 
-            initial={false}
-            animate={{ 
-              width: sidebarCollapsed ? 60 : 320,
-              opacity: sidebarCollapsed ? 0.7 : 1 
-            }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="bg-gray-800/50 backdrop-blur-sm border-r border-gray-700/50 flex flex-col relative"
+        {/* Mobile menu button - only shows on mobile */}
+        <div className="md:hidden absolute top-3 left-3 z-50">
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="bg-gray-800 hover:bg-gray-700 text-white p-2 rounded-md transition-colors"
           >
-            {/* Toggle Button */}
-            <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="absolute -right-3 top-1 z-10 bg-gray-700 hover:bg-gray-600 text-white p-1 rounded-full border border-gray-600 transition-colors" // Reduced top position
+            <Menu size={20} />
+          </button>
+        </div>
+        
+        {/* Mobile sidebar - shows when toggled */}
+        <AnimatePresence>
+          {!sidebarCollapsed && (
+            <motion.div
+              initial={{ x: -300, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -300, opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="md:hidden fixed inset-0 z-40 bg-black/50"
+              onClick={() => setSidebarCollapsed(true)}
             >
-              {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-            </button>
-
-            {/* Sidebar Content - Compact */}
-            <div className="p-2 border-b border-gray-700/50"> {/* Reduced padding */}
-              <div className={`flex items-center justify-between mb-2 ${sidebarCollapsed ? 'justify-center' : ''}`}>
-                {!sidebarCollapsed && (
-                  <h2 className="text-base font-semibold text-white">Learning Hub</h2> 
-                )}
-                {sidebarCollapsed && (
-                  <Menu size={18} className="text-gray-400" />
-                )}
-              </div>
-              
-              {/* User Profile - Compact */}
-              <div className={`flex items-center space-x-2 p-2 bg-gray-700/30 rounded-lg ${sidebarCollapsed ? 'justify-center' : ''}`}>
-                <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <User size={12} />
+              <motion.div
+                initial={{ x: -300 }}
+                animate={{ x: 0 }}
+                exit={{ x: -300 }}
+                transition={{ duration: 0.3 }}
+                className="w-[260px] h-full bg-[#131314] flex flex-col border-r border-gray-800"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-3 flex items-center space-x-2 border-b border-gray-800">
+                  <div className="w-7 h-7 bg-gradient-to-br from-green-500 to-blue-500 rounded-full flex items-center justify-center">
+                    <Bot size={16} />
+                  </div>
+                  <h1 className="text-base font-medium text-white">Learning Assistant</h1>
                 </div>
-                {!sidebarCollapsed && (
-                  <>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-white truncate">
-                        {user?.firstName || 'Learner'}
-                      </p>
-                      <p className="text-xs text-gray-400">🎯 Level Up Mode</p>
+                
+                <div className="p-3">
+                  <button
+                    onClick={() => router.push('/learn')}
+                    className="w-full flex items-center space-x-2 py-2 px-3 bg-transparent hover:bg-gray-800 rounded-md text-gray-200 text-sm transition-colors"
+                  >
+                    <ArrowLeft size={15} />
+                    <span>Back to Learning</span>
+                  </button>
+                </div>
+                
+                <div className="p-3 border-t border-gray-800 mt-auto">
+                  {user && (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center">
+                        <User size={14} />
+                      </div>
+                      <span className="text-sm text-gray-300">{user?.firstName || 'User'}</span>
+                      <SignOutButton>
+                        <button className="ml-auto text-gray-400 hover:text-gray-200 transition-colors">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                          </svg>
+                        </button>
+                      </SignOutButton>
                     </div>
-                    <SignOutButton>
-                      <button className="text-gray-400 hover:text-red-400 transition-colors">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                        </svg>
-                      </button>
-                    </SignOutButton>
-                  </>
-                )}
-              </div>
-            </div>
-          </motion.div>
+                  )}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col">
-          {/* Chat Header - Reduced padding */}
-          <div className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700/50 p-2"> {/* Reduced padding */}
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => router.push('/learn')}
-                className="flex items-center space-x-2 text-gray-400 hover:text-white transition-colors"
-              >
-                <ArrowLeft size={16} />
-                <span className="text-sm">Back to Learning</span>
-              </button>
-              
+  <div className="flex-1 flex flex-col h-full">
+          {/* Chat Header - Sticky within the main content area */}
+          <div className="border-b border-gray-800 p-3 flex items-center md:justify-between md:px-4 sticky top-0 z-10 bg-[#1E1F23]">
+            <div className="flex-1 flex justify-center md:justify-start">
               <div className="flex items-center space-x-2">
-                <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
-                  <Bot size={14} />
+                <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
+                  <Bot size={14} className="text-white" />
                 </div>
-                <div>
-                  <h1 className="text-base font-semibold text-white">AI Learning Companion</h1>
-                  <p className="text-xs text-gray-400">🚀 Visual Learning Experience!</p>
-                </div>
+                <h2 className="text-base font-medium text-white">AI Learning Assistant</h2>
               </div>
             </div>
           </div>
 
-          {/* Messages Area - Compact */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-2"> {/* Reduced padding */}
-            <div className="max-w-4xl mx-auto">
+          {/* Messages Area */}
+          <div className="flex-1 overflow-y-auto" id="messages-container">
+            <div className="max-w-3xl mx-auto">
               {messages.length === 0 ? (
-                <div className="text-center py-6"> {/* Reduced padding */}
-                  <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Bot size={24} />
-                  </div>
-                  <h3 className="text-lg font-semibold text-white mb-2">🎯 Ready for Visual Learning?</h3>
-                  <p className="text-gray-400 mb-4">Ask me anything and get diagrams + images!</p>
-                  
-                  {/* Quick Start Examples - Compact */}
-                  <div className="grid grid-cols-2 gap-3 max-w-2xl mx-auto">
-                    {[
-                      { emoji: "🔬", title: "Science", prompt: "Explain photosynthesis with diagrams" },
-                      { emoji: "💻", title: "Programming", prompt: "Show me how React works with architecture" },
-                      { emoji: "📊", title: "Math", prompt: "Visualize calculus concepts" },
-                      { emoji: "🏛️", title: "History", prompt: "Ancient Rome architecture and culture" }
-                    ].map((example, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => setInputValue(example.prompt)}
-                        className="bg-gray-800/50 hover:bg-gray-700/50 p-3 rounded-lg border border-gray-600 transition-all hover:scale-105 text-left"
-                      >
-                        <div className="text-xl mb-1">{example.emoji}</div>
-                        <div className="text-white font-medium text-sm">{example.title}</div>
-                      </button>
-                    ))}
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center py-8 max-w-md px-4">
+                    <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Bot size={24} />
+                    </div>
+                    <h3 className="text-xl font-medium text-white mb-2">How can I help you learn today?</h3>
+                    <p className="text-gray-400 mb-5">Ask me anything and I&apos;ll provide visual explanations and diagrams.</p>
+                    
+                    {/* Example prompts */}
+                    <div className="space-y-2">
+                      {[
+                        { prompt: "Explain photosynthesis with diagrams" },
+                        { prompt: "Show me how React works with architecture" },
+                        { prompt: "Visualize calculus concepts" },
+                        { prompt: "Ancient Rome architecture and culture" }
+                      ].map((example, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setInputValue(example.prompt)}
+                          className="w-full text-left p-3 border border-gray-700 rounded-md bg-[#202123] hover:bg-gray-800 transition-colors text-sm text-gray-200"
+                        >
+                          {example.prompt}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ) : (
-                messages.map((message) => (
-                  <EnhancedMessageWithVisuals key={message.id} message={message} />
-                ))
+                <div className="divide-y divide-gray-800">
+                  {messages.map((message) => (
+                    <EnhancedMessageWithVisuals key={message.id} message={message} />
+                  ))}
+                </div>
               )}
 
               {/* Loading indicator */}
               {isLoading && (
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex justify-start"
-                >
-                  <div className="flex space-x-3 max-w-3xl">
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-green-500 flex items-center justify-center">
+                <div className="p-6">
+                  <div className="flex items-start">
+                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center mr-4 flex-shrink-0">
                       <Bot size={16} />
                     </div>
-                    <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-4">
-                      <div className="flex space-x-2 mb-2">
-                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce"></div>
-                        <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                        <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                      </div>
-                      <p className="text-xs text-gray-400">🧠 Creating diagrams & finding visuals...</p>
+                    <div className="flex space-x-2">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
                   </div>
-                </motion.div>
+                </div>
               )}
 
               <div ref={messagesEndRef} />
             </div>
           </div>
 
-          {/* Input Area - Compact */}
-          <div className="border-t border-gray-700/50 bg-gray-800/30 backdrop-blur-sm p-2"> {/* Reduced padding */}
-            <div className="max-w-4xl mx-auto">
-              <div className="flex space-x-2"> {/* Reduced gap */}
-                <textarea
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="🎯 Ask for diagrams and visual explanations..."
-                  className="flex-1 bg-gray-700/50 border border-gray-600/50 rounded-lg px-3 py-2 text-white placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors text-sm" // Reduced text size
-                  rows={1}
-                  disabled={isLoading || isSending}
-                />
-                <button
-                  onClick={() => handleSubmit()}
-                  disabled={!inputValue.trim() || isLoading || isSending}
-                  className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-lg transition-all hover:scale-105 flex items-center justify-center min-w-[45px]" // Reduced size
-                >
-                  <Send size={12} /> {/* Reduced icon size */}
-                </button>
-              </div>
+          {/* Input Area - Like ChatGPT */}
+          <div className="border-t border-gray-800 p-4 md:p-4 sticky bottom-0 bg-[#1E1F23] z-10">
+            <div className="max-w-3xl mx-auto relative">
+              <textarea
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask for diagrams and visual explanations..."
+                className="w-full bg-[#343541] border border-gray-600/50 rounded-xl px-4 py-3 text-white placeholder-gray-400 resize-none focus:outline-none focus:border-gray-400 transition-colors text-sm"
+                rows={1}
+                disabled={isLoading || isSending}
+                style={{ paddingRight: '40px' }}
+              />
+              <button
+                onClick={() => handleSubmit()}
+                disabled={!inputValue.trim() || isLoading || isSending}
+                className="absolute right-3 bottom-3 text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Send size={16} />
+              </button>
+              <p className="text-gray-500 text-xs mt-2 text-center">
+                AI Learning Assistant may produce inaccurate information. Verify important content.
+              </p>
             </div>
           </div>
         </div>
@@ -346,106 +407,8 @@ export default function EnhancedChatPage() {
   );
 }
 
-// Enhanced Message Component with Architecture Diagrams and Images
-const EnhancedMessageWithVisuals = ({ message }: { message: Message }) => {
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-3`}
-    >
-      <div className={`flex space-x-3 max-w-4xl ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
-        {/* Avatar */}
-        <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-          message.sender === 'user' 
-            ? 'bg-gradient-to-br from-purple-500 to-blue-500' 
-            : 'bg-gradient-to-br from-blue-500 to-green-500'
-        }`}>
-          {message.sender === 'user' ? <User size={16} /> : <Bot size={16} />}
-        </div>
-
-        {/* Message Content */}
-        <div className={`flex-1 rounded-2xl p-4 ${
-          message.sender === 'user'
-            ? 'bg-gradient-to-br from-purple-600 to-blue-600 text-white'
-            : 'bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 text-gray-100'
-        }`}>
-          {message.sender === 'ai' ? (
-            <div>
-              <div className="prose prose-invert max-w-none">
-                <ReactMarkdown>
-                  {message.content}
-                </ReactMarkdown>
-              </div>
-              
-              {/* Related Topic Image at Bottom */}
-              {message.imageUrl && (
-  <div className="mt-4 p-3 bg-gradient-to-r from-gray-700/20 to-gray-600/20 rounded-lg border border-gray-600/30">
-    <div className="flex items-center space-x-2 mb-2">
-      <ImageIcon className="text-blue-400" size={16} />
-      <span className="text-sm font-medium text-blue-300">Visual Learning Aid</span>
-    </div>
-    <img 
-      src={message.imageUrl} // <- This displays your Unsplash image
-      alt={`Visual representation of ${message.topic || 'topic'}`}
-      className="w-full rounded-lg shadow-lg hover:scale-105 transition-transform cursor-pointer"
-      loading="lazy"
-      onError={(e) => {
-        // Fallback if image fails to load
-        e.currentTarget.style.display = 'none';
-      }}
-    />
-    <p className="text-xs text-gray-400 mt-2 text-center">
-      🔍 Related to: {message.topic || 'Current Topic'}
-    </p>
-  </div>
-)}
-
-              {/* Gamification Elements */}
-              {message.pointsEarned && (
-                <div className="mt-4 p-3 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-lg border border-yellow-500/30">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Star className="text-yellow-400" size={16} />
-                      <span className="text-yellow-400 font-semibold">+{message.pointsEarned} XP Earned!</span>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <Zap className="text-blue-400" size={14} />
-                      <span className="text-xs text-gray-300">Visual Learning Bonus</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Achievement Badges */}
-              {message.achievements && message.achievements.length > 0 && (
-                <div className="mt-3">
-                  <div className="flex flex-wrap gap-2">
-                    {message.achievements.map((achievement, idx) => (
-                      <div key={idx} className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 px-3 py-1 rounded-full border border-purple-500/30">
-                        <div className="flex items-center space-x-1">
-                          <Trophy size={12} className="text-purple-400" />
-                          <span className="text-xs font-medium text-purple-300">{achievement}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="whitespace-pre-wrap">{message.content}</p>
-          )}
-          
-          <div className="mt-2 text-xs opacity-70">
-            {message.timestamp.toLocaleTimeString()}
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
-};
+// Message Component - Using our enhanced component instead
+// const EnhancedMessageWithVisuals = ({ message }: { message: Message }) => { ... };
 
 // Generate enhanced response with architecture diagrams and comprehensive content
 const generateEnhancedResponse = async (input: string, baseResponse: string) => {
@@ -499,7 +462,7 @@ ${generatePracticeChallenge(topic, input)}
 
 // Generate ASCII architecture diagrams based on topic
 const generateArchitectureDiagram = (topic: string, input: string) => {
-  const diagrams = {
+  const diagrams: { [key: string]: string; programming: string; science: string; math: string; history: string; general: string } = {
     programming: `
 ## 📐 **Architecture Overview: React Component Flow**
 
@@ -514,49 +477,49 @@ const generateArchitectureDiagram = (topic: string, input: string) => {
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 \`\`\`
 `,
-    science: `
+  science: `
 ## 🔬 **Scientific Process Diagram**
 
 \`\`\`
-    ┌──────────────┐
-    │  Observation │
-    └──────┬───────┘
-           │
-    ┌──────▼───────┐
-    │  Hypothesis  │
-    └──────┬───────┘
-           │
-    ┌──────▼───────┐     ┌─────────────┐
-    │ Experiment   │────▶│   Analysis  │
-    └──────────────┘     └─────┬───────┘
-                                │
-                         ┌──────▼───────┐
-                         │  Conclusion  │
-                         └──────────────┘
+  ┌──────────────┐
+  │  Observation │
+  └──────┬───────┘
+       │
+  ┌──────▼───────┐
+  │  Hypothesis  │
+  └──────┬───────┘
+       │
+  ┌──────▼───────┐     ┌─────────────┐
+  │ Experiment   │────▶│   Analysis  │
+  └──────────────┘     └─────┬───────┘
+                │
+             ┌──────▼───────┐
+             │  Conclusion  │
+             └──────────────┘
 \`\`\`
 `,
-    math: `
+  math: `
 ## 📊 **Mathematical Concept Map**
 
 \`\`\`
-           ┌─────────────┐
-           │   Problem   │
-           └──────┬──────┘
-                  │
-      ┌───────────┼───────────┐
-      │           │           │
+       ┌─────────────┐
+       │   Problem   │
+       └──────┬──────┘
+          │
+    ┌───────────┼───────────┐
+    │           │           │
 ┌─────▼─────┐ ┌───▼────┐ ┌───▼────┐
 │  Method 1 │ │Method 2│ │Method 3│
 └─────┬─────┘ └───┬────┘ └───┬────┘
-      │           │           │
-      └───────────┼───────────┘
-                  │
-           ┌──────▼──────┐
-           │  Solution   │
-           └─────────────┘
+    │           │           │
+    └───────────┼───────────┘
+          │
+       ┌──────▼──────┐
+       │  Solution   │
+       └─────────────┘
 \`\`\`
 `,
-    history: `
+  history: `
 ## 🏛️ **Historical Timeline Structure**
 
 \`\`\`
@@ -573,29 +536,29 @@ Causes              Causes              Causes
 Effects             Effects             Effects
 \`\`\`
 `,
-    general: `
+  general: `
 ## 🎯 **Learning Framework**
 
 \`\`\`
-     ┌─────────────┐
-     │   QUESTION  │
-     └──────┬──────┘
-            │
-    ┌───────▼───────┐
-    │   RESEARCH    │
-    └───────┬───────┘
-            │
-    ┌───────▼───────┐
-    │   ANALYZE     │
-    └───────┬───────┘
-            │
-    ┌───────▼───────┐
-    │   UNDERSTAND  │
-    └───────┬───────┘
-            │
-    ┌───────▼───────┐
-    │    APPLY      │
-    └───────────────┘
+   ┌─────────────┐
+   │   QUESTION  │
+   └──────┬──────┘
+      │
+  ┌───────▼───────┐
+  │   RESEARCH    │
+  └───────┬───────┘
+      │
+  ┌───────▼───────┐
+  │   ANALYZE     │
+  └───────┬───────┘
+      │
+  ┌───────▼───────┐
+  │   UNDERSTAND  │
+  └───────┬───────┘
+      │
+  ┌───────▼───────┐
+  │    APPLY      │
+  └───────────────┘
 \`\`\`
 `
   };
@@ -628,7 +591,7 @@ const extractTopicFromInput = (input: string): string => {
 };
 
 const getEngagingTitle = (topic: string, input: string) => {
-  const titles = {
+  const titles: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
     science: 'Scientific Discovery Mission',
     programming: 'Code Architecture Quest',
     math: 'Mathematical Exploration',
@@ -647,7 +610,7 @@ const getDifficultyLevel = (input: string) => {
 };
 
 const getNextMilestone = (topic: string) => {
-  const milestones = {
+  const milestones: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
     science: 'Unlock "Lab Master" badge at 500 XP',
     programming: 'Achieve "Code Architect" status at 750 XP',
     math: 'Reach "Number Wizard" level at 600 XP',
@@ -668,7 +631,7 @@ const generateDeepInsights = (input: string, topic: string) => {
 };
 
 const generateProTips = (topic: string) => {
-  const tips = {
+  const tips: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
     science: '🔬 Connect theories to experiments\n🌍 Look for patterns in nature\n📊 Use visual models and simulations',
     programming: '💻 Practice with real projects\n🔍 Debug systematically\n🚀 Learn by building, not just reading',
     math: '📐 Visualize abstract concepts\n🔢 Practice mental calculations\n📊 Apply to real-world problems',
@@ -689,7 +652,7 @@ const generatePracticeChallenge = (topic: string, input: string) => {
 };
 
 const getRelatedConcepts = (topic: string) => {
-  const concepts = {
+  const concepts: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
     science: 'physics, chemistry, and environmental science',
     programming: 'algorithms, data structures, and system design',
     math: 'statistics, geometry, and applied mathematics',
@@ -702,7 +665,7 @@ const getRelatedConcepts = (topic: string) => {
 };
 
 const getRealWorldExamples = (topic: string) => {
-  const examples = {
+  const examples: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
     science: 'medicine, technology, and environmental solutions',
     programming: 'web development, mobile apps, and AI systems',
     math: 'finance, engineering, and data analysis',
@@ -715,7 +678,7 @@ const getRealWorldExamples = (topic: string) => {
 };
 
 const getFutureApplications = (topic: string) => {
-  const applications = {
+  const applications: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
     science: 'breakthrough research, innovation, and discovery',
     programming: 'advanced software engineering and system architecture',
     math: 'data science, machine learning, and quantitative analysis',

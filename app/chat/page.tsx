@@ -1,14 +1,19 @@
+
 'use client';
+import React from 'react';
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUser } from '@clerk/nextjs';
 import { toast } from 'sonner';
-import { Send, Mic, Upload, BookOpen, Trophy, ArrowLeft } from 'lucide-react';
+import { Send, BookOpen, Trophy, ArrowLeft } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
-import PointsDisplay from '@/components/PointsDisplay';
-import QuizComponent from '@/components/QuizComponent';
+import PointsDisplay from '../components/PointsDisplay';
+import QuizComponent from '../components/QuizComponent';
+
+// API URL configuration
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 interface Message {
   id: number;
@@ -28,6 +33,17 @@ interface QuizQuestion {
   diagram?: string;
 }
 
+interface ErrorWithMessage {
+  name?: string;
+  message?: string;
+}
+
+declare global {
+  interface Window {
+    showFloatingPoints?: (points: number, message: string) => void;
+  }
+}
+
 export default function ChatPage() {
   const { user } = useUser();
   const router = useRouter();
@@ -38,7 +54,99 @@ export default function ChatPage() {
   const [showQuiz, setShowQuiz] = useState(false);
   const [currentQuizQuestions, setCurrentQuizQuestions] = useState<QuizQuestion[]>([]);
   const [currentTopic, setCurrentTopic] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loadingTimeoutReached, setLoadingTimeoutReached] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Error boundary for rendering errors
+  useEffect(() => {
+    const errorHandler = (event: ErrorEvent) => {
+      setError(event.message || 'An unexpected error occurred.');
+    };
+    window.addEventListener('error', errorHandler);
+    return () => window.removeEventListener('error', errorHandler);
+  }, []);
+
+  // Loading timeout to prevent infinite spinner
+  useEffect(() => {
+    if (isLoading) {
+      const timeout = setTimeout(() => setLoadingTimeoutReached(true), 15000);
+      return () => clearTimeout(timeout);
+    } else {
+      setLoadingTimeoutReached(false);
+    }
+  }, [isLoading]);
+
+  const handleSubmit = React.useCallback(async (customInput?: string) => {
+    const input = customInput || inputValue;
+    if (!input.trim()) return;
+
+    const userMessage: Message = {
+      id: Date.now(),
+      sender: 'user',
+      content: input,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInputValue('');
+    setIsLoading(true);
+
+    try {
+      // Process with your existing content processing
+      const payload = JSON.parse(localStorage.getItem('chatPayload') || '{}');
+      
+      // Add timeout for fetch
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      const response = await fetch(`${API_URL}/process-content`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notes: input,
+          files: payload.files || []
+        }),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Server responded with status ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.status === 'success') {
+        const aiMessage: Message = {
+          id: Date.now() + 1,
+          sender: 'ai',
+          content: data.response,
+          timestamp: new Date(),
+          topic: input.substring(0, 50) // Store topic for quiz context
+        };
+
+        setMessages(prev => [...prev, aiMessage]);
+        setCurrentTopic(input.substring(0, 50));
+      } else {
+        throw new Error(data.error || 'Failed to process content');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      
+      // Provide more specific error messages based on the error type
+      const err = error as ErrorWithMessage;
+      if (err?.name === 'AbortError') {
+        toast.error('Request timed out. The server might be busy.');
+      } else if (err?.message?.includes('Failed to fetch')) {
+        toast.error('Unable to connect to the server. Please check if the backend is running.');
+      } else {
+        toast.error(`Failed to process your request: ${err?.message || 'Unknown error'}`);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [inputValue]);
 
   // Initialize with URL prompt if provided
   useEffect(() => {
@@ -47,7 +155,7 @@ export default function ChatPage() {
       setInputValue(prompt);
       handleSubmit(prompt);
     }
-  }, [searchParams]);
+  }, [searchParams, handleSubmit]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -74,71 +182,30 @@ export default function ChatPage() {
     }
   }, [messages]);
 
-  const handleSubmit = async (customInput?: string) => {
-    const input = customInput || inputValue;
-    if (!input.trim()) return;
-
-    const userMessage: Message = {
-      id: Date.now(),
-      sender: 'user',
-      content: input,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInputValue('');
-    setIsLoading(true);
-
-    try {
-      // Process with your existing content processing
-      const payload = JSON.parse(localStorage.getItem('chatPayload') || '{}');
-      
-      const response = await fetch('http://localhost:5000/process-content', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          notes: input,
-          files: payload.files || []
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.status === 'success') {
-        const aiMessage: Message = {
-          id: Date.now() + 1,
-          sender: 'ai',
-          content: data.response,
-          timestamp: new Date(),
-          topic: input.substring(0, 50) // Store topic for quiz context
-        };
-
-        setMessages(prev => [...prev, aiMessage]);
-        setCurrentTopic(input.substring(0, 50));
-      } else {
-        throw new Error(data.error || 'Failed to process content');
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      toast.error('Failed to process your request');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // **THIS IS THE QUIZ SUBMISSION LOGIC YOU NEED TO MODIFY**
+  // Quiz generation logic
   const handleQuizGeneration = async (context: string) => {
     try {
       setIsLoading(true);
       
-const response = await fetch('http://localhost:5000/interactive-questions', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    context: context,
-    user_id: user?.id // THIS IS CRUCIAL - sends user ID to backend
-  })
-});
+      // Add timeout for fetch
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      const response = await fetch(`${API_URL}/interactive-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context: context,
+          user_id: user?.id // THIS IS CRUCIAL - sends user ID to backend
+        }),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`Server responded with status ${response.status}`);
+      }
 
       const data = await response.json();
 
@@ -147,20 +214,33 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
         setShowQuiz(true);
         
         // Award points for generating quiz (handled in backend)
-        toast.success('Quiz generated! Complete it to earn points! 🎯');
+        toast.success('Quiz generated! Complete it to earn points! ');
       } else {
         throw new Error('Failed to generate quiz');
       }
     } catch (error) {
       console.error('Error generating quiz:', error);
-      toast.error('Failed to generate quiz');
+      
+      // More specific error messaging
+      const err = error as ErrorWithMessage;
+      if (err?.name === 'AbortError') {
+        toast.error('Quiz generation timed out. The server might be busy.');
+      } else if (err?.message?.includes('Failed to fetch')) {
+        toast.error('Unable to connect to the quiz server. Please check if the backend is running.');
+      } else {
+        toast.error(`Failed to generate quiz: ${err?.message || 'Unknown error'}`);
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
-  // **CRITICAL: Quiz Submission with Points Integration**
-  const handleQuizSubmission = async (answers: string[], correctCount: number, totalQuestions: number) => {
+  // Quiz Submission with Points Integration
+  const handleQuizSubmission = async (
+    answers: any[], 
+    correctCount: number, 
+    totalQuestions: number
+  ) => {
     if (!user?.id) {
       toast.error('Please sign in to earn points');
       return;
@@ -169,7 +249,11 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
     const score = correctCount / totalQuestions;
 
     try {
-      const response = await fetch('http://localhost:5000/api/quiz/submit', {
+      // Add timeout for fetch
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      const response = await fetch(`${API_URL}/api/quiz/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -181,21 +265,28 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
             timestamp: new Date().toISOString(),
             answers: answers
           }
-        })
+        }),
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`Server responded with status ${response.status}`);
+      }
 
       const result = await response.json();
       
       if (result.status === 'success') {
         // Trigger floating points animation
-        if ((window as any).showFloatingPoints) {
+        if (window.showFloatingPoints) {
           const message = result.points_awarded.activity_type === 'perfect_quiz' 
-            ? 'Perfect Score! 🎯' 
+            ? 'Perfect Score! ' 
             : result.points_awarded.is_first_quiz 
-              ? 'First Quiz Bonus! 🎉' 
-              : 'Quiz Complete! ✅';
+              ? 'First Quiz Bonus! ' 
+              : 'Quiz Complete! ';
               
-          (window as any).showFloatingPoints(
+          window.showFloatingPoints(
             result.points_awarded.points_earned,
             message
           );
@@ -203,20 +294,29 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
 
         // Show special celebration for first quiz
         if (result.points_awarded.is_first_quiz) {
-          toast.success('🎉 Congratulations on your first quiz! Bonus points earned!');
+          toast.success(' Congratulations on your first quiz! Bonus points earned!');
         } else {
-          toast.success(`Great job! You earned ${result.points_awarded.points_earned} points! 🎯`);
+          toast.success(`Great job! You earned ${result.points_awarded.points_earned} points! `);
         }
 
         console.log('Points awarded:', result.points_awarded);
       }
     } catch (error) {
       console.error('Error submitting quiz:', error);
-      toast.error('Failed to submit quiz results');
+      
+      // Better error messaging
+      const err = error as ErrorWithMessage;
+      if (err?.name === 'AbortError') {
+        toast.error('Quiz submission timed out. Points may be awarded later.');
+      } else if (err?.message?.includes('Failed to fetch')) {
+        toast.error('Unable to connect to the points server. Please try again later.');
+      } else {
+        toast.error(`Failed to submit quiz results: ${err?.message || 'Unknown error'}`);
+      }
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -225,6 +325,26 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
+      {/* Error boundary UI */}
+      {error && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80">
+          <div className="bg-red-800 text-white p-8 rounded-xl shadow-xl max-w-lg">
+            <h2 className="text-xl font-bold mb-2">Error</h2>
+            <p>{error}</p>
+            <button className="mt-4 bg-white text-red-800 px-4 py-2 rounded" onClick={() => setError(null)}>Dismiss</button>
+          </div>
+        </div>
+      )}
+      {/* Loading timeout UI */}
+      {isLoading && loadingTimeoutReached && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black bg-opacity-60">
+          <div className="bg-yellow-800 text-white p-6 rounded-xl shadow-xl max-w-md">
+            <h2 className="text-lg font-bold mb-2">Loading Timeout</h2>
+            <p>The server is taking too long to respond. Please check your backend or try again later.</p>
+            <button className="mt-4 bg-white text-yellow-800 px-4 py-2 rounded" onClick={() => setIsLoading(false)}>Dismiss</button>
+          </div>
+        </div>
+      )}
       {/* Points Display at Top */}
       {user && (
         <div className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur-sm border-b border-gray-700/50">
@@ -275,14 +395,14 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
                     onClick={() => setShowQuiz(false)}
                     className="text-gray-400 hover:text-white text-2xl"
                   >
-                    ×
+                    
                   </button>
                 </div>
                 
                 <QuizComponent 
                   questions={currentQuizQuestions} 
                   topic={currentTopic}
-                  onComplete={handleQuizSubmission}  // Connect to points system
+                  onComplete={handleQuizSubmission}
                 />
               </motion.div>
             </motion.div>
@@ -295,7 +415,7 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
             <div className="text-center text-gray-400 py-12">
               <BookOpen size={48} className="mx-auto mb-4 text-gray-600" />
               <p className="text-lg">Start learning by asking a question or uploading content!</p>
-              <p className="text-sm">Complete quizzes to earn points and level up! 🎯</p>
+              <p className="text-sm">Complete quizzes to earn points and level up! </p>
             </div>
           ) : (
             messages.map((message, index) => (
@@ -316,17 +436,7 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
                   {message.sender === 'ai' ? (
                     <div>
                       <div className="prose prose-invert max-w-none">
-                        <ReactMarkdown 
-                          components={{
-                            h2: ({ children }) => (
-                              <h2 className="text-xl font-bold text-blue-400 mb-3 flex items-center space-x-2">
-                                {children}
-                              </h2>
-                            ),
-                            p: ({ children }) => <p className="text-gray-300 mb-2">{children}</p>,
-                            ul: ({ children }) => <ul className="list-disc list-inside text-gray-300 space-y-1">{children}</ul>,
-                          }}
-                        >
+                        <ReactMarkdown>
                           {message.content}
                         </ReactMarkdown>
                       </div>
@@ -344,7 +454,6 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
                         
                         <button
                           onClick={() => {
-                            // Add explain more functionality
                             toast.info('Explain more feature coming soon!');
                           }}
                           className="flex items-center space-x-2 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition-colors"
@@ -415,25 +524,25 @@ const response = await fetch('http://localhost:5000/interactive-questions', {
               onClick={() => setInputValue('Explain quantum physics basics')}
               className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full text-sm transition-colors"
             >
-              🔬 Science
+               Science
             </button>
             <button
               onClick={() => setInputValue('Teach me JavaScript fundamentals')}
               className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full text-sm transition-colors"
             >
-              💻 Programming
+               Programming
             </button>
             <button
               onClick={() => setInputValue('Help me learn calculus')}
               className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full text-sm transition-colors"
             >
-              📊 Math
+               Math
             </button>
             <button
               onClick={() => setInputValue('Explain world history timeline')}
               className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full text-sm transition-colors"
             >
-              🏛️ History
+               History
             </button>
           </div>
         </div>
