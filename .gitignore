@@ -48,3 +48,6 @@ myenv/
 # project directories
 backend/downloads/
 backend/model/
+
+# clerk configuration (can include secrets)
+/.clerk/
