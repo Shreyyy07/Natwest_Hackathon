@@ -91,8 +91,8 @@ export default function UploadModule() {
         let i = 0;
         while (i < messages.length) {
           if (messages[i].sender === "user") {
-            let userMsg = messages[i];
-            let aiMsg = messages[i + 1] && messages[i + 1].sender === "ai" ? messages[i + 1] : null;
+            const userMsg = messages[i];
+            const aiMsg = messages[i + 1] && messages[i + 1].sender === "ai" ? messages[i + 1] : null;
             pairs.push({ user: userMsg, ai: aiMsg });
             i += aiMsg ? 2 : 1;
           } else {
@@ -340,7 +340,7 @@ export default function UploadModule() {
               </span>
             </h1>
             <p className="text-gray-400 text-lg max-w-2xl mx-auto">
-              For example: 'Explain quantum computing basics' or 'Help me understand machine learning concepts'
+              For example: &#39;Explain quantum computing basics&#39; or &#39;Help me understand machine learning concepts&#39;
             </p>
           </div>
 
@@ -398,7 +398,7 @@ export default function UploadModule() {
                 ) : (
                   <>
                     <Sparkles size={20} />
-                    <span>Let's explore</span>
+                    <span>Let&#39;s explore</span>
                   </>
                 )}
               </button>

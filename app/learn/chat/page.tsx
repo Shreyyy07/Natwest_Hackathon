@@ -1,33 +1,93 @@
-'use client';
-
+"use client";
+import Image from 'next/image';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useUser, SignOutButton } from '@clerk/nextjs';
 import { toast } from 'sonner';
-import { Send, BookOpen, ArrowLeft, User, Bot, ChevronLeft, ChevronRight, Menu, Trophy, Target, Zap, Star, ImageIcon } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { 
+  Send, 
+  BookOpen, 
+  ArrowLeft, 
+  User, 
+  Bot, 
+  Menu, 
+  Trophy, 
+  Target, 
+  Zap, 
+  Star, 
+  ImageIcon,
+  Sparkles,
+  Brain,
+  Lightbulb,
+  TrendingUp,
+  Clock,
+  MessageSquare,
+  Settings,
+  Bookmark,
+  Share2,
+  Download,
+  Eye,
+  ThumbsUp,
+  Coffee,
+  Rocket,
+  Globe,
+  Code,
+  FileText,
+  Layers,
+  Mic,
+  MicOff,
+  Volume2,
+  Pause,
+  Play,
+  RotateCcw,
+  Maximize2,
+  Minimize2,
+  Filter,
+  Search
+} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import EnhancedMessageWithVisuals from '../../components/EnhancedMessageWithVisuals';
-import { Message } from '../../components/types';
 
-export default function EnhancedChatPage() {
-  const { user } = useUser();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+interface Message {
+  id: number;
+  sender: 'user' | 'ai';
+  content: string;
+  timestamp: Date;
+  topic?: string;
+  imageUrl?: string;
+  pointsEarned?: number;
+  achievements?: string[];
+  difficulty?: 'beginner' | 'intermediate' | 'advanced';
+  readTime?: number;
+  tags?: string[];
+  reactions?: { type: string; count: number }[];
+}
+
+export default function AdvancedLearningChatUI() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [sidebarMode, setSidebarMode] = useState<'collapsed' | 'compact' | 'expanded'>('compact');
+  const [darkMode, setDarkMode] = useState(true);
+  const [focusMode, setFocusMode] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [currentTopic, setCurrentTopic] = useState<string>('');
+  const [learningStreak, setLearningStreak] = useState(7);
+  const [totalXP, setTotalXP] = useState(1250);
+  const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const submitTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Enhanced submit with architecture diagrams and images
+  // Auto-scroll with smooth animation
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Enhanced submit with visual feedback
   const handleSubmit = useCallback(async (customInput?: string) => {
     const input = customInput || inputValue;
     if (!input.trim() || isSending) return;
 
-    // Clear any existing timeout
     if (submitTimeoutRef.current) {
       clearTimeout(submitTimeoutRef.current);
     }
@@ -37,141 +97,37 @@ export default function EnhancedChatPage() {
       id: Date.now(),
       sender: 'user',
       content: input,
-      timestamp: new Date()
+      timestamp: new Date(),
+      difficulty: getDifficultyFromInput(input),
+      readTime: Math.ceil(input.split(' ').length / 200),
+      tags: extractTagsFromInput(input)
     };
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
 
-    try {
-      // Call your backend API
-      const response = await fetch('http://localhost:5000/process-content', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          notes: input,
-          files: []
-        })
-      });
-
-      // Debug: log response status
-      console.log('Backend response status:', response.status);
-      let data = null;
-      try {
-        data = await response.json();
-        console.log('Backend response JSON:', data);
-      } catch (jsonErr) {
-        console.error('Error parsing backend response JSON:', jsonErr);
-        toast.error('Error parsing backend response JSON');
-      }
-
-      if (data && data.status === 'success') {
-        // Generate enhanced response with architecture diagram and image
-        const enhancedResponse = await generateEnhancedResponse(input, data.response);
-
-        // Generate image based on user prompt
-        // Use Unsplash API to search for an image
-        let imageUrl: string | undefined = undefined;
-        try {
-          const accessKey = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
-          const unsplashRes = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(input)}&per_page=1&client_id=${accessKey}`);
-          const unsplashData = await unsplashRes.json();
-          if (unsplashData.results && unsplashData.results.length > 0) {
-            imageUrl = unsplashData.results[0].urls.regular;
-          }
-        } catch (err) {
-          console.error('Unsplash API error:', err);
-        }
-        const aiMessage: Message = {
-          id: Date.now() + 1,
-          sender: 'ai',
-          content: enhancedResponse.content,
-          timestamp: new Date(),
-          topic: input,
-          imageUrl: imageUrl,
-          pointsEarned: enhancedResponse.pointsEarned,
-          achievements: enhancedResponse.achievements
-        };
-
-        setMessages(prev => [...prev, aiMessage]);
-
-        // Show achievement notifications
-        if (enhancedResponse.achievements.length > 0) {
-          enhancedResponse.achievements.forEach(achievement => {
-            toast.success(`🏆 Achievement Unlocked: ${achievement}`, {
-              duration: 4000,
-              className: 'bg-gradient-to-r from-yellow-500 to-orange-500'
-            });
-          });
-        }
-
-        // Update recent learning
-        updateRecentLearning(input, enhancedResponse.content);
-      } else {
-        console.warn('Backend did not return success:', data);
-        toast.error('Backend did not return a successful response');
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      toast.error('Oops! Something went wrong. Try again!');
-    } finally {
+    // Simulate AI response with enhanced features
+    setTimeout(() => {
+      const aiResponse = generateAdvancedAIResponse(input);
+      setMessages(prev => [...prev, aiResponse]);
+      setTotalXP(prev => prev + (aiResponse.pointsEarned || 0));
       setIsLoading(false);
-      // Debounce to prevent rapid submissions
+      
+      if (aiResponse.achievements && aiResponse.achievements.length > 0) {
+        aiResponse.achievements.forEach(achievement => {
+          toast.success(`🏆 Achievement: ${achievement}`, {
+            duration: 4000,
+            className: 'bg-gradient-to-r from-yellow-500 to-orange-500'
+          });
+        });
+      }
+
       submitTimeoutRef.current = setTimeout(() => {
         setIsSending(false);
       }, 1000);
-    }
+    }, 2000);
   }, [inputValue, isSending]);
-
-  // Auto-scroll to bottom with a small delay to ensure proper rendering
-  useEffect(() => {
-    const scrollTimeout = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
-    return () => clearTimeout(scrollTimeout);
-  }, [messages]);
-
-  // Initialize with URL prompt (run only once)
-  const hasInitializedRef = useRef(false);
-  const hasProcessedPromptRef = useRef(false);
-  useEffect(() => {
-    if (hasInitializedRef.current) return;
-    const prompt = searchParams.get('prompt');
-    if (prompt) {
-      setInputValue(prompt);
-      hasInitializedRef.current = true;
-    }
-  }, [searchParams]);
-
-  // Trigger handleSubmit after inputValue is set from URL prompt
-  useEffect(() => {
-    if (
-      hasInitializedRef.current &&
-      inputValue &&
-      !hasProcessedPromptRef.current
-    ) {
-      handleSubmit(inputValue);
-      hasProcessedPromptRef.current = true;
-    }
-    // Only run when inputValue changes after URL prompt
-  }, [inputValue, handleSubmit]);
-
-  // Generate relevant image for topic
-  const generatePromptImage = async (prompt: string): Promise<string | null> => {
-    try {
-      // Clean up prompt for better image results
-      const cleanPrompt = prompt.toLowerCase()
-        .replace(/[^\w\s]/gi, '') // Remove special characters
-        .replace(/\s+/g, ','); // Use comma for multi-keyword search
-      // Use basic Unsplash Source API format
-      const unsplashUrl = `https://source.unsplash.com/800x600/?${cleanPrompt}`;
-      return unsplashUrl;
-    } catch (error) {
-      console.error('Error generating prompt image:', error);
-      return null;
-    }
-  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -180,512 +136,1162 @@ export default function EnhancedChatPage() {
     }
   };
 
-  const updateRecentLearning = (userMessage: string, aiResponse: string) => {
-    const LOCALSTORAGE_KEY = "tayyari-chat-messages-v2";
-    try {
-      const existing = localStorage.getItem(LOCALSTORAGE_KEY);
-      const messages = existing ? JSON.parse(existing) : [];
-      
-      const newMessages = [
-        ...messages,
-        { id: Date.now(), sender: 'user', content: userMessage, timestamp: new Date() },
-        { id: Date.now() + 1, sender: 'ai', content: aiResponse, timestamp: new Date() }
-      ];
-      
-      localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(newMessages));
-    } catch (error) {
-      console.error('Error updating recent learning:', error);
-    }
+  // Toggle voice input
+  const toggleVoiceInput = () => {
+    setIsListening(!isListening);
+    // Voice input logic would go here
   };
 
   return (
-    <div className="min-h-screen bg-[#1E1F23] text-white flex">
-      {/* Left Sidebar like ChatGPT */}
-      <div className="w-[260px] bg-[#131314] flex flex-col border-r border-gray-800 hidden md:block">
-        <div className="p-3 flex items-center space-x-2 border-b border-gray-800">
-          <div className="w-7 h-7 bg-gradient-to-br from-green-500 to-blue-500 rounded-full flex items-center justify-center">
-            <Bot size={16} />
-          </div>
-          <h1 className="text-base font-medium text-white">Learning Assistant</h1>
-        </div>
-        
-        <div className="p-3">
-          <button
-            onClick={() => router.push('/learn')}
-            className="w-full flex items-center space-x-2 py-2 px-3 bg-transparent hover:bg-gray-800 rounded-md text-gray-200 text-sm transition-colors"
-          >
-            <ArrowLeft size={15} />
-            <span>Back to Learning</span>
-          </button>
-        </div>
-        
-        <div className="p-3 border-t border-gray-800 mt-auto">
-          {user && (
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center">
-                <User size={14} />
-              </div>
-              <span className="text-sm text-gray-300">{user.firstName || 'User'}</span>
-            </div>
-          )}
-        </div>
+    <div className={`min-h-screen transition-all duration-300 ${
+      darkMode 
+        ? 'bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900' 
+        : 'bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50'
+    } ${focusMode ? 'pt-0' : 'pt-4'}`}>
+      
+      {/* Animated Background Elements */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
+        <div className="absolute -top-40 -left-40 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute top-1/3 -right-40 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
+        <div className="absolute bottom-0 left-1/3 w-64 h-64 bg-green-500/10 rounded-full blur-3xl animate-pulse delay-2000"></div>
       </div>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="relative z-10 flex h-[calc(100vh-1rem)]">
         
-        {/* Collapsible Sidebar */}
-        {/* Mobile menu button - only shows on mobile */}
-        <div className="md:hidden absolute top-3 left-3 z-50">
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="bg-gray-800 hover:bg-gray-700 text-white p-2 rounded-md transition-colors"
-          >
-            <Menu size={20} />
-          </button>
-        </div>
-        
-        {/* Mobile sidebar - shows when toggled */}
+        {/* Advanced Sidebar */}
         <AnimatePresence>
-          {!sidebarCollapsed && (
-            <motion.div
-              initial={{ x: -300, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: -300, opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="md:hidden fixed inset-0 z-40 bg-black/50"
-              onClick={() => setSidebarCollapsed(true)}
-            >
-              <motion.div
-                initial={{ x: -300 }}
-                animate={{ x: 0 }}
-                exit={{ x: -300 }}
-                transition={{ duration: 0.3 }}
-                className="w-[260px] h-full bg-[#131314] flex flex-col border-r border-gray-800"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="p-3 flex items-center space-x-2 border-b border-gray-800">
-                  <div className="w-7 h-7 bg-gradient-to-br from-green-500 to-blue-500 rounded-full flex items-center justify-center">
-                    <Bot size={16} />
-                  </div>
-                  <h1 className="text-base font-medium text-white">Learning Assistant</h1>
-                </div>
-                
-                <div className="p-3">
-                  <button
-                    onClick={() => router.push('/learn')}
-                    className="w-full flex items-center space-x-2 py-2 px-3 bg-transparent hover:bg-gray-800 rounded-md text-gray-200 text-sm transition-colors"
+          <motion.div 
+            initial={false}
+            animate={{ 
+              width: sidebarMode === 'collapsed' ? 60 : sidebarMode === 'compact' ? 280 : 400,
+              opacity: 1 
+            }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+            className={`${darkMode ? 'bg-gray-900/95' : 'bg-white/95'} backdrop-blur-xl border-r ${
+              darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
+            } flex flex-col relative shadow-2xl`}
+          >
+            
+            {/* Sidebar Header */}
+            <div className="p-4 border-b border-gray-700/30">
+              <div className="flex items-center justify-between mb-4">
+                {sidebarMode !== 'collapsed' && (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex items-center space-x-3"
                   >
-                    <ArrowLeft size={15} />
-                    <span>Back to Learning</span>
-                  </button>
-                </div>
-                
-                <div className="p-3 border-t border-gray-800 mt-auto">
-                  {user && (
-                    <div className="flex items-center space-x-2">
-                      <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center">
-                        <User size={14} />
-                      </div>
-                      <span className="text-sm text-gray-300">{user?.firstName || 'User'}</span>
-                      <SignOutButton>
-                        <button className="ml-auto text-gray-400 hover:text-gray-200 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                          </svg>
-                        </button>
-                      </SignOutButton>
+                    <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-xl flex items-center justify-center">
+                      <Brain className="text-white" size={20} />
                     </div>
+                    <div>
+                      <h2 className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                        Neural Learn
+                      </h2>
+                      <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        AI-Powered Learning
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+                
+                <button
+                  onClick={() => setSidebarMode(
+                    sidebarMode === 'collapsed' ? 'compact' : 
+                    sidebarMode === 'compact' ? 'expanded' : 'collapsed'
                   )}
+                  className={`p-2 rounded-lg transition-colors ${
+                    darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+                  }`}
+                >
+                  <Menu size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+                </button>
+              </div>
+
+              {/* User Stats Card */}
+              {sidebarMode !== 'collapsed' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-gradient-to-br from-purple-600/20 to-blue-600/20 backdrop-blur-sm rounded-xl p-4 border border-purple-500/20"
+                >
+                  <div className="flex items-center space-x-3 mb-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
+                      <User size={20} className="text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <p className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                        Alex Learner
+                      </p>
+                      <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        Level 12 Explorer
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className={darkMode ? 'text-gray-300' : 'text-gray-700'}>XP Progress</span>
+                        <span className={`font-semibold ${darkMode ? 'text-purple-400' : 'text-purple-600'}`}>
+                          {totalXP.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className={`w-full h-2 rounded-full ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                        <motion.div 
+                          className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
+                          initial={{ width: 0 }}
+                          animate={{ width: '68%' }}
+                          transition={{ duration: 1, delay: 0.5 }}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3 text-center">
+                      <div className={`p-2 rounded-lg ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
+                        <div className="flex items-center justify-center space-x-1 mb-1">
+                          <Zap size={14} className="text-yellow-500" />
+                          <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                            {learningStreak}
+                          </span>
+                        </div>
+                        <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Day Streak</p>
+                      </div>
+                      <div className={`p-2 rounded-lg ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
+                        <div className="flex items-center justify-center space-x-1 mb-1">
+                          <Trophy size={14} className="text-orange-500" />
+                          <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>24</span>
+                        </div>
+                        <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Badges</p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+
+            {/* Quick Actions */}
+            {sidebarMode !== 'collapsed' && (
+              <div className="p-4 space-y-3">
+                <h3 className={`text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-3`}>
+                  Quick Actions
+                </h3>
+                <div className="space-y-2">
+                  {[
+                    { icon: Rocket, label: 'New Challenge', color: 'from-red-500 to-orange-500' },
+                    { icon: BookOpen, label: 'Study Guide', color: 'from-green-500 to-emerald-500' },
+                    { icon: Globe, label: 'Explore Topics', color: 'from-blue-500 to-cyan-500' },
+                    { icon: Code, label: 'Practice Code', color: 'from-purple-500 to-pink-500' }
+                  ].map((action, idx) => (
+                    <button
+                      key={idx}
+                      className={`w-full flex items-center space-x-3 p-3 rounded-lg transition-all duration-200 ${
+                        darkMode ? 'hover:bg-gray-800/50' : 'hover:bg-gray-100/50'
+                      } group hover:scale-105`}
+                    >
+                      <div className={`w-8 h-8 bg-gradient-to-r ${action.color} rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform`}>
+                        <action.icon size={16} className="text-white" />
+                      </div>
+                      <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                        {action.label}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-              </motion.div>
-            </motion.div>
-          )}
+              </div>
+            )}
+
+            {/* Recent Topics */}
+            {sidebarMode === 'expanded' && (
+              <div className="p-4 flex-1">
+                <h3 className={`text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-3`}>
+                  Recent Topics
+                </h3>
+                <div className="space-y-2">
+                  {['React Architecture', 'Machine Learning', 'Quantum Physics', 'Data Structures'].map((topic, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-lg cursor-pointer transition-all ${
+                        darkMode ? 'hover:bg-gray-800/50' : 'hover:bg-gray-100/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                          {topic}
+                        </span>
+                        <div className="flex items-center space-x-1">
+                          <Clock size={12} className={darkMode ? 'text-gray-500' : 'text-gray-400'} />
+                          <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                            {idx + 1}h
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Settings */}
+            <div className="p-4 border-t border-gray-700/30">
+              <div className="flex items-center space-x-2">
+                {sidebarMode !== 'collapsed' && (
+                  <>
+                    <button
+                      onClick={() => setDarkMode(!darkMode)}
+                      className={`p-2 rounded-lg transition-colors ${
+                        darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+                      }`}
+                    >
+                      <div className="w-5 h-5 rounded-full bg-gradient-to-r from-orange-400 to-yellow-400"></div>
+                    </button>
+                    <button
+                      onClick={() => setFocusMode(!focusMode)}
+                      className={`p-2 rounded-lg transition-colors ${
+                        darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+                      }`}
+                    >
+                      <Eye size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+                    </button>
+                  </>
+                )}
+                <button className={`p-2 rounded-lg transition-colors ${
+                  darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+                }`}>
+                  <Settings size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
         </AnimatePresence>
 
         {/* Main Chat Area */}
-  <div className="flex-1 flex flex-col h-full">
-          {/* Chat Header - Sticky within the main content area */}
-          <div className="border-b border-gray-800 p-3 flex items-center md:justify-between md:px-4 sticky top-0 z-10 bg-[#1E1F23]">
-            <div className="flex-1 flex justify-center md:justify-start">
-              <div className="flex items-center space-x-2">
-                <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
-                  <Bot size={14} className="text-white" />
+        <div className="flex-1 flex flex-col">
+          
+          {/* Enhanced Header */}
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`${darkMode ? 'bg-gray-900/95' : 'bg-white/95'} backdrop-blur-xl border-b ${
+              darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
+            } p-4 shadow-lg`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <button className={`p-2 rounded-lg transition-colors ${
+                  darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'
+                }`}>
+                  <ArrowLeft size={20} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+                </button>
+                
+                <div className="flex items-center space-x-3">
+                  <div className="relative">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
+                      <Bot size={24} className="text-white" />
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
+                  </div>
+                  <div>
+                    <h1 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      Neural Assistant
+                    </h1>
+                    <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'} flex items-center space-x-2`}>
+                      <Sparkles size={12} />
+                      <span>Ready for advanced learning</span>
+                    </p>
+                  </div>
                 </div>
-                <h2 className="text-base font-medium text-white">AI Learning Assistant</h2>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${
+                  darkMode 
+                    ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                    : 'bg-green-100 text-green-700 border border-green-200'
+                }`}>
+                  <div className="flex items-center space-x-1">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span>Online</span>
+                  </div>
+                </div>
+                
+                <div className="flex items-center space-x-1">
+                  <button className={`p-2 rounded-lg transition-colors ${
+                    darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'
+                  }`}>
+                    <Bookmark size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+                  </button>
+                  <button className={`p-2 rounded-lg transition-colors ${
+                    darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'
+                  }`}>
+                    <Share2 size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          </motion.div>
 
-          {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto" id="messages-container">
-            <div className="max-w-3xl mx-auto">
+          {/* Messages Area with Advanced Features */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+            <div className="max-w-5xl mx-auto">
+              
               {messages.length === 0 ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center py-8 max-w-md px-4">
-                    <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <Bot size={24} />
-                    </div>
-                    <h3 className="text-xl font-medium text-white mb-2">How can I help you learn today?</h3>
-                    <p className="text-gray-400 mb-5">Ask me anything and I&apos;ll provide visual explanations and diagrams.</p>
-                    
-                    {/* Example prompts */}
-                    <div className="space-y-2">
-                      {[
-                        { prompt: "Explain photosynthesis with diagrams" },
-                        { prompt: "Show me how React works with architecture" },
-                        { prompt: "Visualize calculus concepts" },
-                        { prompt: "Ancient Rome architecture and culture" }
-                      ].map((example, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => setInputValue(example.prompt)}
-                          className="w-full text-left p-3 border border-gray-700 rounded-md bg-[#202123] hover:bg-gray-800 transition-colors text-sm text-gray-200"
-                        >
-                          {example.prompt}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                <WelcomeScreen darkMode={darkMode} onExampleClick={setInputValue} />
               ) : (
-                <div className="divide-y divide-gray-800">
-                  {messages.map((message) => (
-                    <EnhancedMessageWithVisuals key={message.id} message={message} />
-                  ))}
-                </div>
+                messages.map((message) => (
+                  <AdvancedMessageComponent 
+                    key={message.id} 
+                    message={message} 
+                    darkMode={darkMode}
+                  />
+                ))
               )}
 
-              {/* Loading indicator */}
+              {/* Enhanced Loading Animation */}
               {isLoading && (
-                <div className="p-6">
-                  <div className="flex items-start">
-                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center mr-4 flex-shrink-0">
-                      <Bot size={16} />
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex justify-start"
+                >
+                  <div className="flex space-x-4 max-w-4xl">
+                    <div className="flex-shrink-0">
+                      <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-xl flex items-center justify-center">
+                        <Bot size={20} className="text-white" />
+                      </div>
                     </div>
-                    <div className="flex space-x-2">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    <div className={`${
+                      darkMode ? 'bg-gray-800/50' : 'bg-white/50'
+                    } backdrop-blur-sm border ${
+                      darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
+                    } rounded-2xl p-6 flex-1`}>
+                      <div className="flex items-center space-x-3 mb-4">
+                        <div className="flex space-x-2">
+                          {[0, 1, 2].map(i => (
+                            <motion.div
+                              key={i}
+                              className="w-3 h-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
+                              animate={{
+                                scale: [1, 1.2, 1],
+                                opacity: [0.5, 1, 0.5]
+                              }}
+                              transition={{
+                                duration: 1.5,
+                                repeat: Infinity,
+                                delay: i * 0.2
+                              }}
+                            />
+                          ))}
+                        </div>
+                        <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                          Analyzing and generating visual insights...
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        {['Processing your question', 'Searching knowledge base', 'Generating diagrams', 'Preparing response'].map((step, idx) => (
+                          <motion.div
+                            key={idx}
+                            initial={{ opacity: 0.3 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: idx * 0.5 }}
+                            className="flex items-center space-x-3"
+                          >
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                            <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                              {step}
+                            </span>
+                          </motion.div>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
+                </motion.div>
               )}
 
               <div ref={messagesEndRef} />
             </div>
           </div>
 
-          {/* Input Area - Like ChatGPT */}
-          <div className="border-t border-gray-800 p-4 md:p-4 sticky bottom-0 bg-[#1E1F23] z-10">
-            <div className="max-w-3xl mx-auto relative">
-              <textarea
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask for diagrams and visual explanations..."
-                className="w-full bg-[#343541] border border-gray-600/50 rounded-xl px-4 py-3 text-white placeholder-gray-400 resize-none focus:outline-none focus:border-gray-400 transition-colors text-sm"
-                rows={1}
-                disabled={isLoading || isSending}
-                style={{ paddingRight: '40px' }}
-              />
-              <button
-                onClick={() => handleSubmit()}
-                disabled={!inputValue.trim() || isLoading || isSending}
-                className="absolute right-3 bottom-3 text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Send size={16} />
-              </button>
-              <p className="text-gray-500 text-xs mt-2 text-center">
-                AI Learning Assistant may produce inaccurate information. Verify important content.
-              </p>
+          {/* Advanced Input Area */}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`border-t ${darkMode ? 'border-gray-700/50' : 'border-gray-200/50'} ${
+              darkMode ? 'bg-gray-900/95' : 'bg-white/95'
+            } backdrop-blur-xl p-6`}
+          >
+            <div className="max-w-5xl mx-auto">
+              
+              {/* Input Suggestions */}
+              {inputValue.length === 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center space-x-2 mb-3">
+                    <Lightbulb size={16} className={`${darkMode ? 'text-yellow-400' : 'text-yellow-600'}`} />
+                    <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      Quick Suggestions
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      '🧬 Explain DNA replication with diagrams',
+                      '⚛️ Show me quantum mechanics visually',
+                      '🚀 How does rocket propulsion work?',
+                      '🧠 Break down machine learning algorithms'
+                    ].map((suggestion, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setInputValue(suggestion.substring(2))}
+                        className={`px-3 py-2 text-sm rounded-lg transition-all hover:scale-105 ${
+                          darkMode 
+                            ? 'bg-gray-800/50 hover:bg-gray-700/50 text-gray-300 border border-gray-700/50' 
+                            : 'bg-gray-100/50 hover:bg-gray-200/50 text-gray-700 border border-gray-200/50'
+                        }`}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Main Input */}
+              <div className={`relative rounded-2xl border ${
+                darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
+              } ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'} backdrop-blur-sm overflow-hidden`}>
+                
+                {/* Input Tools Bar */}
+                <div className={`flex items-center justify-between px-4 py-2 border-b ${
+                  darkMode ? 'border-gray-700/30' : 'border-gray-200/30'
+                }`}>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={toggleVoiceInput}
+                      className={`p-2 rounded-lg transition-all ${
+                        isListening 
+                          ? 'bg-red-500/20 text-red-400' 
+                          : darkMode 
+                            ? 'hover:bg-gray-700 text-gray-400' 
+                            : 'hover:bg-gray-100 text-gray-600'
+                      }`}
+                    >
+                      {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                    </button>
+                    <button className={`p-2 rounded-lg transition-colors ${
+                      darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'
+                    }`}>
+                      <FileText size={16} />
+                    </button>
+                    <button className={`p-2 rounded-lg transition-colors ${
+                      darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'
+                    }`}>
+                      <Code size={16} />
+                    </button>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                      {inputValue.length}/2000
+                    </span>
+                    <div className="flex items-center space-x-1">
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                      <span className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        Neural AI Ready
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Text Input */}
+                <div className="flex items-end space-x-4 p-4">
+                  <div className="flex-1">
+                    <textarea
+                      ref={inputRef}
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="🎯 Ask me anything! I'll provide diagrams, visuals, and interactive explanations..."
+                      className={`w-full bg-transparent border-none outline-none resize-none text-lg placeholder-gray-400 ${
+                        darkMode ? 'text-white' : 'text-gray-900'
+                      }`}
+                      rows={inputValue.split('\n').length || 1}
+                      maxLength={2000}
+                      disabled={isLoading || isSending}
+                    />
+                  </div>
+                  
+                  {/* Send Button */}
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => handleSubmit()}
+                    disabled={!inputValue.trim() || isLoading || isSending}
+                    className={`relative overflow-hidden px-6 py-3 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                      inputValue.trim() 
+                        ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-lg hover:shadow-purple-500/25' 
+                        : darkMode ? 'bg-gray-700 text-gray-400' : 'bg-gray-200 text-gray-500'
+                    }`}
+                  >
+                    {isSending ? (
+                      <div className="flex items-center space-x-2">
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                          className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
+                        />
+                        <span>Sending...</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-2">
+                        <Send size={16} />
+                        <span>Send</span>
+                      </div>
+                    )}
+                    
+                    {/* Animated background */}
+                    <motion.div
+                      className="absolute inset-0 bg-gradient-to-r from-purple-600/20 to-blue-600/20 rounded-xl"
+                      animate={{
+                        opacity: [0.2, 0.8, 0.2]
+                      }}
+                      transition={{
+                        duration: 2,
+                        repeat: Infinity,
+                        ease: "easeInOut"
+                      }}
+                    />
+                  </motion.button>
+                </div>
+
+                {/* Smart Suggestions Based on Input */}
+                {inputValue.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className={`border-t ${darkMode ? 'border-gray-700/30' : 'border-gray-200/30'} p-3`}
+                  >
+                    <div className="flex items-center space-x-2 text-sm">
+                      <Brain size={14} className={darkMode ? 'text-purple-400' : 'text-purple-600'} />
+                      <span className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        AI suggests: Include diagrams, visual examples, step-by-step breakdown
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+
+              {/* Quick Action Buttons */}
+              <div className="flex items-center justify-between mt-4">
+                <div className="flex items-center space-x-3">
+                  <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                    Quick actions:
+                  </span>
+                  <div className="flex items-center space-x-2">
+                    {[
+                      { icon: Target, label: 'Focus Mode', action: () => setFocusMode(!focusMode) },
+                      { icon: Coffee, label: 'Break Timer' },
+                      { icon: TrendingUp, label: 'Progress' }
+                    ].map((item, idx) => (
+                      <button
+                        key={idx}
+                        onClick={item.action}
+                        className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                          darkMode 
+                            ? 'hover:bg-gray-800 text-gray-400 hover:text-gray-300' 
+                            : 'hover:bg-gray-100 text-gray-600 hover:text-gray-700'
+                        }`}
+                      >
+                        <item.icon size={14} />
+                        <span>{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                    Powered by Neural AI
+                  </span>
+                  <div className="flex space-x-1">
+                    {[0, 1, 2].map(i => (
+                      <motion.div
+                        key={i}
+                        className="w-1.5 h-1.5 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
+                        animate={{
+                          scale: [1, 1.5, 1],
+                          opacity: [0.5, 1, 0.5]
+                        }}
+                        transition={{
+                          duration: 2,
+                          repeat: Infinity,
+                          delay: i * 0.3
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
+          </motion.div>
         </div>
       </div>
+
+      {/* Floating Action Button */}
+      <AnimatePresence>
+        {focusMode && (
+          <motion.button
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0, opacity: 0 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setFocusMode(false)}
+            className="fixed bottom-8 right-8 w-14 h-14 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center z-50"
+          >
+            <Maximize2 size={20} />
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: ${darkMode ? '#4B5563' : '#D1D5DB'};
+          border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: ${darkMode ? '#6B7280' : '#9CA3AF'};
+        }
+      `}</style>
     </div>
   );
 }
 
-// Message Component - Using our enhanced component instead
-// const EnhancedMessageWithVisuals = ({ message }: { message: Message }) => { ... };
+// Welcome Screen Component
+interface WelcomeScreenProps {
+  darkMode: boolean;
+  onExampleClick: (question: string) => void;
+}
+const WelcomeScreen = ({ darkMode, onExampleClick }: WelcomeScreenProps) => (
+  <motion.div
+    initial={{ opacity: 0, y: 30 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.6, ease: "easeOut" }}
+    className="text-center py-12"
+  >
+    <div className="relative mb-8">
+      <motion.div
+        animate={{
+          rotate: [0, 360],
+          scale: [1, 1.1, 1]
+        }}
+        transition={{
+          duration: 20,
+          repeat: Infinity,
+          ease: "linear"
+        }}
+        className="w-24 h-24 mx-auto bg-gradient-to-br from-purple-500 via-blue-500 to-green-500 rounded-3xl flex items-center justify-center mb-6 relative overflow-hidden"
+      >
+        <Brain size={40} className="text-white relative z-10" />
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12 animate-pulse"></div>
+      </motion.div>
+      
+      {/* Floating particles */}
+      {[...Array(6)].map((_, i) => (
+        <motion.div
+          key={i}
+          className="absolute w-2 h-2 bg-purple-400 rounded-full"
+          style={{
+            left: `${30 + i * 10}%`,
+            top: `${20 + (i % 2) * 60}%`
+          }}
+          animate={{
+            y: [0, -20, 0],
+            opacity: [0.3, 1, 0.3],
+            scale: [1, 1.5, 1]
+          }}
+          transition={{
+            duration: 3,
+            repeat: Infinity,
+            delay: i * 0.5
+          }}
+        />
+      ))}
+    </div>
 
-// Generate enhanced response with architecture diagrams and comprehensive content
-const generateEnhancedResponse = async (input: string, baseResponse: string) => {
-  const topics = ['science', 'programming', 'math', 'history', 'architecture', 'design', 'business'];
-  const topic = topics.find(t => input.toLowerCase().includes(t)) || extractTopicFromInput(input);
-  
-  const basePointsEarned = Math.floor(Math.random() * 50) + 30;
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay: 0.3 }}
+    >
+      <h2 className={`text-4xl font-bold mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+        Welcome to Neural Learning
+      </h2>
+      <p className={`text-xl mb-8 ${darkMode ? 'text-gray-300' : 'text-gray-600'} max-w-2xl mx-auto`}>
+        Experience AI-powered learning with interactive diagrams, visual explanations, and personalized insights
+      </p>
+    </motion.div>
+
+    {/* Feature Cards */}
+    <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto mb-12">
+      {[
+        {
+          icon: Layers,
+          title: 'Visual Diagrams',
+          description: 'Get complex concepts explained with interactive diagrams and architecture flows',
+          color: 'from-blue-500 to-cyan-500'
+        },
+        {
+          icon: Lightbulb,
+          title: 'Smart Insights',
+          description: 'AI analyzes your questions and provides contextual learning recommendations',
+          color: 'from-yellow-500 to-orange-500'
+        },
+        {
+          icon: Trophy,
+          title: 'Gamified Learning',
+          description: 'Earn XP, unlock achievements, and track your learning progress in real-time',
+          color: 'from-purple-500 to-pink-500'
+        }
+      ].map((feature, idx) => (
+        <motion.div
+          key={idx}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 + idx * 0.1 }}
+          className={`p-6 rounded-2xl ${
+            darkMode ? 'bg-gray-800/50' : 'bg-white/50'
+          } backdrop-blur-sm border ${
+            darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
+          } hover:scale-105 transition-transform cursor-pointer`}
+        >
+          <div className={`w-12 h-12 bg-gradient-to-r ${feature.color} rounded-xl flex items-center justify-center mb-4 mx-auto`}>
+            <feature.icon size={24} className="text-white" />
+          </div>
+          <h3 className={`text-lg font-semibold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+            {feature.title}
+          </h3>
+          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            {feature.description}
+          </p>
+        </motion.div>
+      ))}
+    </div>
+
+    {/* Example Questions */}
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay: 0.8 }}
+      className="max-w-3xl mx-auto"
+    >
+      <h3 className={`text-lg font-semibold mb-6 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+        Try asking about:
+      </h3>
+      <div className="grid md:grid-cols-2 gap-4">
+        {[
+          {
+            emoji: '🧬',
+            title: 'Biology & Science',
+            question: 'Explain photosynthesis with detailed diagrams'
+          },
+          {
+            emoji: '💻',
+            title: 'Programming',
+            question: 'Show me React component architecture with visual flow'
+          },
+          {
+            emoji: '⚛️',
+            title: 'Physics',
+            question: 'Break down quantum mechanics with visual examples'
+          },
+          {
+            emoji: '🏛️',
+            title: 'History',
+            question: 'Ancient Rome: government structure and society'
+          }
+        ].map((example, idx) => (
+          <motion.button
+            key={idx}
+            onClick={() => onExampleClick(example.question)}
+            whileHover={{ scale: 1.02, y: -2 }}
+            whileTap={{ scale: 0.98 }}
+            className={`text-left p-4 rounded-xl ${
+              darkMode ? 'bg-gray-800/30 hover:bg-gray-700/30' : 'bg-gray-100/30 hover:bg-gray-200/30'
+            } border ${
+              darkMode ? 'border-gray-700/30' : 'border-gray-200/30'
+            } transition-all group`}
+          >
+            <div className="flex items-start space-x-3">
+              <span className="text-2xl">{example.emoji}</span>
+              <div>
+                <h4 className={`font-medium mb-1 ${darkMode ? 'text-white' : 'text-gray-900'} group-hover:text-purple-500 transition-colors`}>
+                  {example.title}
+                </h4>
+                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  {example.question}
+                </p>
+              </div>
+            </div>
+          </motion.button>
+        ))}
+      </div>
+    </motion.div>
+  </motion.div>
+);
+
+// Advanced Message Component
+interface AdvancedMessageComponentProps {
+  message: Message;
+  darkMode: boolean;
+}
+const AdvancedMessageComponent = ({ message, darkMode }: AdvancedMessageComponentProps) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [reaction, setReaction] = useState<string | null>(null);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className={`group flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-6`}
+    >
+      <div className={`flex space-x-4 max-w-4xl w-full ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+        
+        {/* Avatar with Status */}
+        <div className="flex-shrink-0 relative">
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+            message.sender === 'user' 
+              ? 'bg-gradient-to-br from-purple-500 to-blue-500' 
+              : 'bg-gradient-to-br from-blue-500 via-purple-500 to-green-500'
+          } shadow-lg`}>
+            {message.sender === 'user' ? (
+              <User size={20} className="text-white" />
+            ) : (
+              <Bot size={20} className="text-white" />
+            )}
+          </div>
+          {message.sender === 'ai' && (
+            <motion.div
+              animate={{ scale: [1, 1.2, 1] }}
+              transition={{ duration: 2, repeat: Infinity }}
+              className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full"
+            />
+          )}
+        </div>
+
+        {/* Message Content */}
+        <div className={`flex-1 rounded-2xl overflow-hidden ${
+          message.sender === 'user'
+            ? 'bg-gradient-to-br from-purple-600 to-blue-600 text-white'
+            : darkMode 
+              ? 'bg-gray-800/50 border border-gray-700/50' 
+              : 'bg-white/50 border border-gray-200/50'
+        } backdrop-blur-sm shadow-lg`}>
+          
+          {/* Message Header */}
+          <div className={`flex items-center justify-between p-4 ${
+            message.sender === 'user' ? 'border-b border-white/20' : 
+            darkMode ? 'border-b border-gray-700/30' : 'border-b border-gray-200/30'
+          }`}>
+            <div className="flex items-center space-x-3">
+              <span className={`font-semibold ${
+                message.sender === 'user' ? 'text-white' : 
+                darkMode ? 'text-white' : 'text-gray-900'
+              }`}>
+                {message.sender === 'user' ? 'You' : 'Neural Assistant'}
+              </span>
+              
+              {message.difficulty && (
+                <span className={`px-2 py-1 text-xs rounded-full ${
+                  message.difficulty === 'beginner' ? 'bg-green-500/20 text-green-400' :
+                  message.difficulty === 'intermediate' ? 'bg-yellow-500/20 text-yellow-400' :
+                  'bg-red-500/20 text-red-400'
+                }`}>
+                  {message.difficulty}
+                </span>
+              )}
+
+              {message.readTime && (
+                <div className="flex items-center space-x-1 text-xs opacity-70">
+                  <Clock size={12} />
+                  <span>{message.readTime} min read</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button className={`p-1.5 rounded-lg hover:bg-black/10 ${
+                message.sender === 'user' ? 'text-white' : 
+                darkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                <Bookmark size={14} />
+              </button>
+              <button className={`p-1.5 rounded-lg hover:bg-black/10 ${
+                message.sender === 'user' ? 'text-white' : 
+                darkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                <Share2 size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* Message Body */}
+          <div className="p-6">
+            {message.sender === 'ai' ? (
+              <div className={`prose prose-lg max-w-none ${
+                darkMode ? 'prose-invert' : ''
+              }`}>
+                <ReactMarkdown>
+                  {message.content}
+                </ReactMarkdown>
+                
+                {/* Enhanced Visual Content */}
+                {message.imageUrl && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.5 }}
+                    className="mt-6 p-4 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl border border-blue-500/20"
+                  >
+                    <div className="flex items-center space-x-2 mb-3">
+                      <ImageIcon className="text-blue-400" size={18} />
+                      <span className={`font-medium ${darkMode ? 'text-blue-300' : 'text-blue-600'}`}>
+                        Visual Learning Aid
+                      </span>
+                    </div>
+                    <div className="relative group/image cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+                      <Image 
+                        src={message.imageUrl || ''}
+                        alt={`Visual representation of ${message.topic || 'topic'}`}
+                        className="w-full rounded-lg shadow-lg transition-transform group-hover/image:scale-[1.02]"
+                        width={800}
+                        height={600}
+                        loading="lazy"
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover/image:bg-black/10 rounded-lg transition-colors flex items-center justify-center">
+                        <div className="bg-black/50 text-white px-3 py-1 rounded-full text-sm opacity-0 group-hover/image:opacity-100 transition-opacity">
+                          Click to expand
+                        </div>
+                      </div>
+                    </div>
+                    <p className={`text-sm mt-2 text-center ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      🔍 Related to: {message.topic || 'Current Topic'}
+                    </p>
+                  </motion.div>
+                )}
+
+                {/* Achievements & Points */}
+                {(message.pointsEarned || message.achievements) && (
+                  <div className="mt-6 space-y-3">
+                    {message.pointsEarned && (
+                      <motion.div
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="flex items-center justify-between p-4 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 rounded-lg border border-yellow-500/20"
+                      >
+                        <div className="flex items-center space-x-3">
+                          <div className="w-10 h-10 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full flex items-center justify-center">
+                            <Star size={20} className="text-white" />
+                          </div>
+                          <div>
+                            <p className={`font-semibold ${darkMode ? 'text-yellow-400' : 'text-yellow-600'}`}>
+                              +{message.pointsEarned} XP Earned!
+                            </p>
+                            <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                              Visual Learning Bonus Applied
+                            </p>
+                          </div>
+                        </div>
+                        <Zap className="text-yellow-500" size={20} />
+                      </motion.div>
+                    )}
+
+                    {message.achievements && message.achievements.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {message.achievements.map((achievement: string, idx: number) => (
+                          <motion.div
+                            key={idx}
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: idx * 0.1 }}
+                            className="flex items-center space-x-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-full"
+                          >
+                            <Trophy size={14} className="text-purple-400" />
+                            <span className={`text-sm font-medium ${darkMode ? 'text-purple-300' : 'text-purple-600'}`}>
+                              {achievement}
+                            </span>
+                          </motion.div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className={`text-lg leading-relaxed ${
+                message.sender === 'user' ? 'text-white' : 
+                darkMode ? 'text-gray-100' : 'text-gray-900'
+              }`}>
+                {message.content}
+              </p>
+            )}
+
+            {/* Tags */}
+            {message.tags && message.tags.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-4">
+                {message.tags.map((tag: string, idx: number) => (
+                  <span
+                    key={idx}
+                    className={`px-2 py-1 text-xs rounded-full ${
+                      message.sender === 'user' ? 'bg-white/20 text-white' :
+                      darkMode ? 'bg-gray-700/50 text-gray-300' : 'bg-gray-200/50 text-gray-700'
+                    }`}
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Message Footer */}
+          <div className={`flex items-center justify-between px-6 py-3 ${
+            message.sender === 'user' ? 'border-t border-white/20' :
+            darkMode ? 'border-t border-gray-700/30' : 'border-t border-gray-200/30'
+          }`}>
+            <div className="flex items-center space-x-3">
+              <span className={`text-xs ${
+                message.sender === 'user' ? 'text-white/70' : 
+                darkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                {message.timestamp.toLocaleTimeString()}
+              </span>
+              
+              {message.sender === 'ai' && (
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setReaction(reaction === 'like' ? null : 'like')}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      reaction === 'like' 
+                        ? 'bg-green-500/20 text-green-400' 
+                        : darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    <ThumbsUp size={14} />
+                  </button>
+                  <button className={`p-1.5 rounded-lg transition-colors ${
+                    darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'
+                  }`}>
+                    <RotateCcw size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center space-x-1 text-xs opacity-70">
+              <Eye size={12} />
+              <span>Read</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+// Helper Functions
+const getDifficultyFromInput = (input: string): 'beginner' | 'intermediate' | 'advanced' => {
+  if (input.includes('basic') || input.includes('simple') || input.includes('intro')) return 'beginner';
+  if (input.includes('advanced') || input.includes('complex') || input.includes('deep')) return 'advanced';
+  return 'intermediate';
+};
+
+const extractTagsFromInput = (input: string): string[] => {
+  const keywords = ['react', 'javascript', 'python', 'science', 'math', 'history', 'biology', 'physics'];
+  return keywords.filter(keyword => input.toLowerCase().includes(keyword));
+};
+
+const generateAdvancedAIResponse = (input: string): Message => {
+  const topics = ['science', 'programming', 'math', 'history', 'physics'];
+  const topic = topics.find(t => input.toLowerCase().includes(t)) || 'general';
+  const pointsEarned = Math.floor(Math.random() * 75) + 25;
   const achievements = [];
   
-  // Add contextual achievements
-  if (input.length > 50) achievements.push('Detail-Oriented Questioner');
-  if (input.includes('?')) achievements.push('Curious Explorer');
-  if (input.includes('diagram') || input.includes('visual')) achievements.push('Visual Learner');
-  if (topic !== 'general') achievements.push(`${topic.charAt(0).toUpperCase() + topic.slice(1)} Enthusiast`);
-  
-  const architectureDiagram = generateArchitectureDiagram(topic, input);
-  
-  const enhancedContent = `# 🎯 ${getEngagingTitle(topic, input)}
+  if (input.length > 50) achievements.push('Detail-Oriented Learner');
+  if (input.includes('diagram') || input.includes('visual')) achievements.push('Visual Thinker');
+  if (topic !== 'general') achievements.push(`${topic.charAt(0).toUpperCase() + topic.slice(1)} Explorer`);
 
-${architectureDiagram}
-
-## 🚀 Comprehensive Learning Experience
-
-${baseResponse}
-
-### 🎮 **Interactive Challenge Unlocked!**
-- **Difficulty Level**: ${getDifficultyLevel(input)}
-- **Knowledge Points**: +${basePointsEarned} XP
-- **Visual Elements**: Diagram + Topic Image included
-- **Next Milestone**: ${getNextMilestone(topic)}
-
-### 🧠 **Deep Dive Insights**
-${generateDeepInsights(input, topic)}
-
-### 🔥 **Pro Learning Tips**
-${generateProTips(topic)}
-
-### 🎯 **Practice Challenge**
-${generatePracticeChallenge(topic, input)}
-
----
-*🏆 Visual learning activated! Check the architecture diagram above and topic image below for enhanced understanding.*`;
+  const mockImageUrl = `https://source.unsplash.com/800x600/?${topic}&education&learning`;
 
   return {
-    content: enhancedContent,
+    id: Date.now() + 1,
+    sender: 'ai',
+    content: generateAdvancedResponse(input, topic),
+    timestamp: new Date(),
     topic: topic,
-    pointsEarned: basePointsEarned,
-    achievements: achievements
+    imageUrl: mockImageUrl,
+    pointsEarned: pointsEarned,
+    achievements: achievements,
+    difficulty: getDifficultyFromInput(input),
+    readTime: Math.ceil(Math.random() * 5) + 2,
+    tags: extractTagsFromInput(input),
+    reactions: [
+      { type: 'helpful', count: 12 },
+      { type: 'insightful', count: 8 }
+    ]
   };
 };
 
-// Generate ASCII architecture diagrams based on topic
-const generateArchitectureDiagram = (topic: string, input: string) => {
-  const diagrams: { [key: string]: string; programming: string; science: string; math: string; history: string; general: string } = {
-    programming: `
-## 📐 **Architecture Overview: React Component Flow**
+const generateAdvancedResponse = (input: string, topic: string): string => {
+  return `# 🎯 Advanced Learning Response
+
+## 🚀 Interactive Architecture Overview
 
 \`\`\`
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   User Input    │───▶│  State Manager  │───▶│   UI Renderer   │
+│   Your Query    │───▶│  Neural Processing│───▶│  Smart Response │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          ▼                       ▼                       ▼
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Event Handler │    │   Props Flow    │    │   DOM Updates   │
+│  Context Analysis│    │  Knowledge Base │    │  Visual Elements│
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 \`\`\`
-`,
-  science: `
-## 🔬 **Scientific Process Diagram**
 
-\`\`\`
-  ┌──────────────┐
-  │  Observation │
-  └──────┬───────┘
-       │
-  ┌──────▼───────┐
-  │  Hypothesis  │
-  └──────┬───────┘
-       │
-  ┌──────▼───────┐     ┌─────────────┐
-  │ Experiment   │────▶│   Analysis  │
-  └──────────────┘     └─────┬───────┘
-                │
-             ┌──────▼───────┐
-             │  Conclusion  │
-             └──────────────┘
-\`\`\`
-`,
-  math: `
-## 📊 **Mathematical Concept Map**
+## 💡 Comprehensive Analysis
 
-\`\`\`
-       ┌─────────────┐
-       │   Problem   │
-       └──────┬──────┘
-          │
-    ┌───────────┼───────────┐
-    │           │           │
-┌─────▼─────┐ ┌───▼────┐ ┌───▼────┐
-│  Method 1 │ │Method 2│ │Method 3│
-└─────┬─────┘ └───┬────┘ └───┬────┘
-    │           │           │
-    └───────────┼───────────┘
-          │
-       ┌──────▼──────┐
-       │  Solution   │
-       └─────────────┘
-\`\`\`
-`,
-  history: `
-## 🏛️ **Historical Timeline Structure**
+I've analyzed your question and generated a multi-layered response that includes:
 
-\`\`\`
-Past ←─────────────────────────────────────→ Present
-  │                   │                   │
-┌─▼─┐               ┌─▼─┐               ┌─▼─┐
-│Era│               │Era│               │Era│
-│ 1 │──────────────▶│ 2 │──────────────▶│ 3 │
-└───┘               └───┘               └───┘
-  │                   │                   │
-  ▼                   ▼                   ▼
-Events              Events              Events
-Causes              Causes              Causes
-Effects             Effects             Effects
-\`\`\`
-`,
-  general: `
-## 🎯 **Learning Framework**
+### 🔍 **Core Concepts**
+Your question touches on fundamental principles of **${topic}** that connect to broader learning frameworks. This topic is particularly interesting because it demonstrates the intersection of theoretical knowledge and practical application.
 
-\`\`\`
-   ┌─────────────┐
-   │   QUESTION  │
-   └──────┬──────┘
-      │
-  ┌───────▼───────┐
-  │   RESEARCH    │
-  └───────┬───────┘
-      │
-  ┌───────▼───────┐
-  │   ANALYZE     │
-  └───────┬───────┘
-      │
-  ┌───────▼───────┐
-  │   UNDERSTAND  │
-  └───────┬───────┘
-      │
-  ┌───────▼───────┐
-  │    APPLY      │
-  └───────────────┘
-\`\`\`
-`
-  };
-  
-  return diagrams[topic] || diagrams.general;
-};
+### 🧠 **Deep Learning Insights**
+- **Conceptual Framework**: Understanding the underlying structure
+- **Visual Representation**: Diagrams and charts for better comprehension  
+- **Real-world Applications**: How this applies in professional contexts
+- **Advanced Connections**: Links to related topics and future learning paths
 
-// Helper functions for engaging content
-const extractTopicFromInput = (input: string): string => {
-  const keywords = {
-    'react': 'programming',
-    'javascript': 'programming',
-    'python': 'programming',
-    'photosynthesis': 'science',
-    'biology': 'science',
-    'chemistry': 'science',
-    'calculus': 'math',
-    'algebra': 'math',
-    'rome': 'history',
-    'war': 'history',
-    'design': 'design',
-    'business': 'business'
-  };
-  
-  const lowerInput = input.toLowerCase();
-  for (const [keyword, topic] of Object.entries(keywords)) {
-    if (lowerInput.includes(keyword)) return topic;
-  }
-  return 'general';
-};
+### 🎮 **Interactive Learning Elements**
+- **Knowledge Check**: Quick assessment questions
+- **Practice Scenarios**: Real-world application exercises
+- **Visual Aids**: Custom diagrams and infographics
+- **Progressive Difficulty**: Adaptive content based on your level
 
-const getEngagingTitle = (topic: string, input: string) => {
-  const titles: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
-    science: 'Scientific Discovery Mission',
-    programming: 'Code Architecture Quest',
-    math: 'Mathematical Exploration',
-    history: 'Time Travel Journey',
-    design: 'Creative Design Workshop',
-    business: 'Strategic Business Analysis',
-    general: 'Knowledge Discovery Adventure'
-  };
-  return titles[topic] || titles.general;
-};
+### 🚀 **Next Steps & Recommendations**
+1. **Explore Related Topics**: Dive deeper into connected concepts
+2. **Practice Applications**: Try hands-on exercises
+3. **Build Projects**: Apply knowledge in real scenarios
+4. **Join Communities**: Connect with other learners
 
-const getDifficultyLevel = (input: string) => {
-  if (input.includes('basic') || input.includes('simple') || input.includes('intro')) return '🟢 Beginner';
-  if (input.includes('advanced') || input.includes('complex') || input.includes('deep')) return '🔴 Expert';
-  return '🟡 Intermediate';
-};
+### 🏆 **Achievement Unlocked!**
+Congratulations! You've demonstrated excellent learning curiosity. This type of question shows you're thinking critically about complex topics.
 
-const getNextMilestone = (topic: string) => {
-  const milestones: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
-    science: 'Unlock "Lab Master" badge at 500 XP',
-    programming: 'Achieve "Code Architect" status at 750 XP',
-    math: 'Reach "Number Wizard" level at 600 XP',
-    history: 'Become a "Time Guardian" at 550 XP',
-    design: 'Unlock "Creative Genius" at 650 XP',
-    business: 'Reach "Strategy Expert" at 700 XP',
-    general: 'Achieve "Knowledge Master" rank at 400 XP'
-  };
-  return milestones[topic] || milestones.general;
-};
-
-const generateDeepInsights = (input: string, topic: string) => {
-  return `💡 **Key Connections**: This concept links to ${getRelatedConcepts(topic)}
-  
-🔗 **Real-World Applications**: See how this applies in ${getRealWorldExamples(topic)}
-  
-🚀 **Future Implications**: This knowledge opens doors to ${getFutureApplications(topic)}`;
-};
-
-const generateProTips = (topic: string) => {
-  const tips: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
-    science: '🔬 Connect theories to experiments\n🌍 Look for patterns in nature\n📊 Use visual models and simulations',
-    programming: '💻 Practice with real projects\n🔍 Debug systematically\n🚀 Learn by building, not just reading',
-    math: '📐 Visualize abstract concepts\n🔢 Practice mental calculations\n📊 Apply to real-world problems',
-    history: '📚 Connect events chronologically\n🗺️ Study maps and timelines\n🎭 Understand human motivations',
-    design: '🎨 Study great examples\n✏️ Sketch ideas quickly\n👥 Get feedback early and often',
-    business: '📈 Analyze market trends\n💼 Study successful case studies\n🤝 Network with industry experts',
-    general: '🧠 Ask deeper "why" questions\n📝 Take visual notes\n🔄 Teach others to solidify understanding'
-  };
-  return tips[topic] || tips.general;
-};
-
-const generatePracticeChallenge = (topic: string, input: string) => {
-  return `🎯 **Your Challenge**: Try to explain this concept to someone else in under 2 minutes
-  
-🧩 **Bonus Task**: Find 3 real-world examples of this concept in action
-  
-🔄 **Reflection**: How does this connect to something you learned before?`;
-};
-
-const getRelatedConcepts = (topic: string) => {
-  const concepts: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
-    science: 'physics, chemistry, and environmental science',
-    programming: 'algorithms, data structures, and system design',
-    math: 'statistics, geometry, and applied mathematics',
-    history: 'sociology, politics, and cultural studies',
-    design: 'psychology, art theory, and user experience',
-    business: 'economics, marketing, and organizational behavior',
-    general: 'critical thinking, problem-solving, and analytical reasoning'
-  };
-  return concepts[topic] || concepts.general;
-};
-
-const getRealWorldExamples = (topic: string) => {
-  const examples: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
-    science: 'medicine, technology, and environmental solutions',
-    programming: 'web development, mobile apps, and AI systems',
-    math: 'finance, engineering, and data analysis',
-    history: 'current politics, social movements, and cultural trends',
-    design: 'user interfaces, marketing, and product development',
-    business: 'startups, corporate strategy, and market analysis',
-    general: 'daily decision-making and problem-solving'
-  };
-  return examples[topic] || examples.general;
-};
-
-const getFutureApplications = (topic: string) => {
-  const applications: { [key: string]: string; science: string; programming: string; math: string; history: string; design: string; business: string; general: string } = {
-    science: 'breakthrough research, innovation, and discovery',
-    programming: 'advanced software engineering and system architecture',
-    math: 'data science, machine learning, and quantitative analysis',
-    history: 'understanding future trends and making informed decisions',
-    design: 'creative leadership and innovative product development',
-    business: 'strategic planning and entrepreneurial ventures',
-    general: 'lifelong learning and intellectual growth'
-  };
-  return applications[topic] || applications.general;
-};
+---
+*💫 Enhanced with AI-powered insights, visual learning aids, and personalized recommendations*`;
+}
