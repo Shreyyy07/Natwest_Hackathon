@@ -13,6 +13,7 @@ import {
   MERMAID_AGENT_INSTRUCTIONS,
   SUMMARY_CONSOLIDATION_AGENT_INSTRUCTIONS
 } from '../data/agents';
+import { ApiConfig, validateApiKeys } from '../config/apiConfig';
 
 import { getLocationBasedResources } from '../data/crisisResources';
 import { SafetyStatus } from '../types/newAgents';
@@ -75,10 +76,22 @@ export class AgentService {
   private model: any;
   private learningState: LearningState;
 
-  constructor(apiKey: string) {
-    this.genAI = new GoogleGenerativeAI(apiKey);
+  constructor(apiKey?: string) {
+    const key = apiKey || ApiConfig.GEMINI_API_KEY;
+    
+    // Validate API key
+    if (!key) {
+      console.error('Missing Gemini API Key - Learning Assistant will not function correctly');
+    } else {
+      console.log('Initializing AgentService with Gemini API');
+    }
+    
+    this.genAI = new GoogleGenerativeAI(key);
     this.model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
     this.learningState = this.initializeLearningState();
+    
+    // Run API key validation to log any missing keys
+    validateApiKeys();
   }
 
   // Sets up initial learning state with default values

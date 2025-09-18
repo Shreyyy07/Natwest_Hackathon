@@ -43,7 +43,7 @@ pipeline = KPipeline(lang_code='a')
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-CORS(app, resources={r"/*": {"origins": ["http://localhost:3000"], "methods": ["GET", "POST"], "allow_headers": ["Content-Type"]}})
+CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "http://localhost:3001"], "methods": ["GET", "POST"], "allow_headers": ["Content-Type"]}})
 
 client = OpenAI(
     base_url="https://models.github.ai/inference",
@@ -862,5 +862,5 @@ def get_leaderboard():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
-    print("🚀 Starting Tayyari.ai backend with gamification...")
-    app.run(debug=True)
+    print("🚀 Starting Tayyari.ai backend with gamification on http://localhost:5000...")
+    app.run(debug=True, host='0.0.0.0', port=5000)
