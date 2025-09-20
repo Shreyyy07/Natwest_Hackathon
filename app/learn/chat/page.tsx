@@ -1,1297 +1,1251 @@
-"use client";
-import Image from 'next/image';
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { toast } from 'sonner';
-import { 
-  Send, 
-  BookOpen, 
-  ArrowLeft, 
-  User, 
-  Bot, 
-  Menu, 
-  Trophy, 
-  Target, 
-  Zap, 
-  Star, 
-  ImageIcon,
-  Sparkles,
-  Brain,
-  Lightbulb,
-  TrendingUp,
-  Clock,
-  MessageSquare,
-  Settings,
-  Bookmark,
-  Share2,
-  Download,
-  Eye,
-  ThumbsUp,
-  Coffee,
-  Rocket,
-  Globe,
-  Code,
-  FileText,
-  Layers,
-  Mic,
-  MicOff,
-  Volume2,
-  Pause,
-  Play,
-  RotateCcw,
-  Maximize2,
-  Minimize2,
-  Filter,
-  Search
-} from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+'use client';
 
-interface Message {
-  id: number;
-  sender: 'user' | 'ai';
-  content: string;
-  timestamp: Date;
-  topic?: string;
-  imageUrl?: string;
-  pointsEarned?: number;
-  achievements?: string[];
-  difficulty?: 'beginner' | 'intermediate' | 'advanced';
-  readTime?: number;
-  tags?: string[];
-  reactions?: { type: string; count: number }[];
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+  memo,
+} from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useUser, useClerk } from '@clerk/nextjs';
+import {
+  Bot,
+  Send,
+  User as UserIcon,
+  Sparkles,
+  Loader2,
+  Copy,
+  Check,
+  Plus,
+  Trophy,
+  Trash2,
+  GitBranch,
+  Code,
+  PenLine,
+  Brain,
+  Settings,
+  Menu,
+  X,
+  PlusCircle,
+  ExternalLink,
+  LogOut,
+} from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
+import type mermaidType from 'mermaid';
+import Quiz from '../../components/Quiz';
+import { Message as ChatMessageType } from '../../components/types';
+
+import {
+  ChatSession,
+  loadChats,
+  saveChats,
+  newChatSession,
+  deriveTitleFromMessage,
+  getActiveChatId,
+  setActiveChatId as persistActiveChatId,
+  upsertChat,
+  deleteChat as removeChat,
+} from './chatStore';
+
+// ----------------------
+// Utils
+// ----------------------
+const uuid = () =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ||
+  '/api/process-content';
+
+// ----------------------
+// UI Notification System
+// ----------------------
+const ToastProvider = ({ children }: { children: React.ReactNode }) => {
+  const [toasts, setToasts] = useState<
+    Array<{ id: string; message: string; type: 'success' | 'error' | 'achievement' }>
+  >([]);
+
+  const addToast = useCallback((message: string, type: 'success' | 'error' | 'achievement' = 'success') => {
+    const id = uuid();
+    setToasts(prev => [...prev, { id, message, type }]);
+    const timeout = setTimeout(() => {
+      setToasts(prev => prev.filter(toast => toast.id !== id));
+    }, 3500);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
+    (window as any).notify = addToast;
+    return () => {
+      (window as any).notify = undefined;
+    };
+  }, [addToast]);
+
+  return (
+    <>
+      {children}
+      <div className="fixed top-6 right-6 z-[100] space-y-3">
+        <AnimatePresence initial={false}>
+          {toasts.map(toast => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, x: 50, scale: 0.95 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 50, scale: 0.95 }}
+              role="status"
+              aria-live="polite"
+              className={`flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg text-base font-medium border ${
+                toast.type === 'success' 
+                  ? 'bg-white border-slate-200 text-slate-800'
+                  : toast.type === 'error'
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-amber-50 border-amber-200 text-amber-800'
+              }`}
+            >
+              {toast.type === 'achievement' && <Trophy size={18} className="text-amber-500" />}
+              {toast.type === 'success' && <Check size={18} className="text-emerald-500" />}
+              {toast.type === 'error' && <span className="text-red-500 font-bold" aria-hidden>!</span>}
+              <span>{toast.message}</span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    </>
+  );
+};
+
+const notify = (message: string, type: 'success' | 'error' | 'achievement' = 'success') => {
+  if (typeof window !== 'undefined' && (window as any).notify) {
+    (window as any).notify(message, type);
+  }
+};
+
+// ----------------------
+// Mermaid Diagram Component (lazy-loaded)
+// ----------------------
+const MermaidDiagram = ({ chart }: { chart: string }) => {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    let mermaid: typeof mermaidType | null = null;
+    const localRef = ref.current;
+
+    (async () => {
+      try {
+        const m = (await import('mermaid')).default;
+        if (!isMounted) return;
+
+        mermaid = m;
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: 'base',
+          themeVariables: {
+            primaryColor: '#f8fafc',
+            primaryTextColor: '#0f172a',
+            primaryBorderColor: '#e2e8f0',
+            lineColor: '#94a3b8',
+            background: '#ffffff',
+            mainBkg: '#ffffff',
+          },
+        });
+
+        if (!localRef || !chart) return;
+
+        const id = `mermaid-${uuid()}`;
+        mermaid
+          .render(id, chart)
+          .then(({ svg }) => {
+            if (localRef) localRef.innerHTML = svg;
+          })
+          .catch(() => {
+            if (localRef) {
+              localRef.innerHTML =
+                '<p class="text-slate-400 text-sm p-4">Could not render diagram.</p>';
+            }
+          });
+      } catch {
+        if (localRef) {
+          localRef.innerHTML =
+            '<p class="text-slate-400 text-sm p-4">Could not render diagram.</p>';
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+      if (localRef) localRef.innerHTML = '';
+    };
+  }, [chart]);
+
+  return <div ref={ref} className="[&>svg]:w-full [&>svg]:h-auto text-slate-800" />;
+};
+
+// ----------------------
+// Code Block Component
+// ----------------------
+const CodeBlock = memo(({ inline, className, children, ...props }: any) => {
+  const [isCopied, setIsCopied] = useState(false);
+  const codeText = useMemo(
+    () => (Array.isArray(children) ? children.join('') : String(children || '')),
+    [children]
+  );
+
+  if (inline) {
+    return (
+      <code className="px-1.5 py-0.5 bg-slate-100 text-slate-800 rounded-md text-[0.94em] font-mono">
+        {children}
+      </code>
+    );
+  }
+
+  const language = (className || '').replace('language-', '') || 'text';
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(codeText);
+      setIsCopied(true);
+      notify('Copied to clipboard');
+      setTimeout(() => setIsCopied(false), 1600);
+    } catch {
+      notify('Failed to copy', 'error');
+    }
+  };
+
+  return (
+    <div className="group relative my-5 rounded-xl border border-slate-200 bg-slate-50/60">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200">
+        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          {language}
+        </span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+          aria-label={isCopied ? 'Code copied' : 'Copy code to clipboard'}
+        >
+          {isCopied ? <Check size={16} /> : <Copy size={16} />}
+          {isCopied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <pre className="p-4 text-[0.95rem] overflow-x-auto font-mono leading-relaxed" {...props}>
+        <code className={className}>{children}</code>
+      </pre>
+    </div>
+  );
+});
+CodeBlock.displayName = 'CodeBlock';
+
+// ----------------------
+// Markdown Rendering Components
+// ----------------------
+const markdownComponents = {
+  h1: (props: any) => <h1 {...props} className="text-4xl font-bold text-slate-900 mt-8 mb-5" />,
+  h2: (props: any) => <h2 {...props} className="text-3xl font-semibold text-slate-900 mt-7 mb-4 border-b border-slate-200 pb-3" />,
+  h3: (props: any) => <h3 {...props} className="text-2xl font-semibold text-slate-900 mt-6 mb-3" />,
+  p: (props: any) => <p {...props} className="text-slate-700 leading-relaxed my-4 text-[1.01rem]" />,
+  ul: (props: any) => <ul {...props} className="list-disc list-outside space-y-2.5 text-slate-700 my-4 ml-6" />,
+  ol: (props: any) => <ol {...props} className="list-decimal list-outside space-y-2.5 text-slate-700 my-4 ml-6" />,
+  li: (props: any) => <li {...props} className="pl-2 text-[1.01rem]" />,
+  a: (props: any) => (
+    <a
+      {...props}
+      className="text-blue-600 hover:underline underline-offset-2 decoration-blue-400"
+      target="_blank"
+      rel="noopener noreferrer"
+    />
+  ),
+  blockquote: (props: any) => (
+    <blockquote className="border-l-4 border-slate-300 pl-5 my-5 text-slate-600 italic text-base">
+      {props.children}
+    </blockquote>
+  ),
+  code: CodeBlock as any,
+};
+
+// ----------------------
+// Sidebar Components
+// ----------------------
+const SidebarButton = ({
+  icon,
+  label,
+  onClick,
+  variant = 'default',
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick?: () => void;
+  variant?: 'default' | 'danger' | 'link';
+}) => {
+  const base = 'w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm font-medium';
+  const styles =
+    variant === 'danger'
+      ? 'text-red-600 hover:bg-red-50 border border-red-100'
+      : variant === 'link'
+      ? 'text-slate-700 hover:bg-slate-100 border border-slate-200'
+      : 'text-slate-800 bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50';
+  return (
+    <button type="button" onClick={onClick} className={`${base} ${styles}`}>
+      {icon}
+      <span className="truncate">{label}</span>
+    </button>
+  );
+};
+
+function formatRelTime(ts: number) {
+  const d = Date.now() - ts;
+  const mins = Math.floor(d / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
 }
 
-export default function AdvancedLearningChatUI() {
-  const [messages, setMessages] = useState<Message[]>([]);
+// ----------------------
+// Main Chat Interface
+// ----------------------
+export default function ElegantChat() {
+  const { user } = useUser();
+  const { signOut } = useClerk();
+  const searchParams = useSearchParams();
+
+  // Mode: Learn | Quiz
+  const [mode, setMode] = useState<'learn' | 'quiz'>('learn');
+
+  // Session-level state
+  const [chats, setChats] = useState<ChatSession[]>([]);
+  const [activeChatId, setActiveId] = useState<string | null>(null);
+
+  // Message list for the active session (FULL transcript across modes)
+  const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [sidebarMode, setSidebarMode] = useState<'collapsed' | 'compact' | 'expanded'>('compact');
-  const [darkMode, setDarkMode] = useState(true);
-  const [focusMode, setFocusMode] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [currentTopic, setCurrentTopic] = useState<string>('');
-  const [learningStreak, setLearningStreak] = useState(7);
-  const [totalXP, setTotalXP] = useState(1250);
-  const [activeFilters, setActiveFilters] = useState<string[]>([]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [showQuickActions, setShowQuickActions] = useState(false);
+
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile drawer
+
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const submitTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
 
-  // Auto-scroll with smooth animation
+  // Persist and load mode preference
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    try {
+      const m = localStorage.getItem('tayyari.mode') as 'learn' | 'quiz' | null;
+      if (m === 'learn' || m === 'quiz') setMode(m);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem('tayyari.mode', mode);
+    } catch {}
+  }, [mode]);
 
-  // Enhanced submit with visual feedback
-  const handleSubmit = useCallback(async (customInput?: string) => {
-    const input = customInput || inputValue;
-    if (!input.trim() || isSending) return;
-
-    if (submitTimeoutRef.current) {
-      clearTimeout(submitTimeoutRef.current);
+  // Persisted chats init
+  useEffect(() => {
+    const stored = loadChats();
+    if (stored.length === 0) {
+      const fresh = newChatSession();
+      saveChats([fresh]);
+      setChats([fresh]);
+      setActiveId(fresh.id);
+      persistActiveChatId(fresh.id);
+      setMessages([]);
+      return;
     }
+    const sorted = [...stored].sort((a, b) => b.updatedAt - a.updatedAt);
+    setChats(sorted);
+    const savedActive = getActiveChatId();
+    const pick = savedActive && sorted.find(c => c.id === savedActive) ? savedActive : sorted[0].id;
+    setActiveId(pick);
+    persistActiveChatId(pick);
+    setMessages(sorted.find(c => c.id === pick)?.messages as ChatMessageType[] || []);
+  }, []);
+
+  // Save when messages change
+  useEffect(() => {
+    if (!activeChatId) return;
+    setChats(prev => {
+      const idx = prev.findIndex(c => c.id === activeChatId);
+      if (idx === -1) return prev;
+      const current = prev[idx];
+      let title = current.title;
+      if (!title || title === 'New chat') {
+        const firstUser = (messages || []).find(m => m.sender === 'user');
+        if (firstUser?.content) title = deriveTitleFromMessage(firstUser.content);
+      }
+      // Normalize timestamps for compatibility
+      const normalizedMessages = messages.map(m => ({
+        ...m,
+        timestamp:
+          typeof m.timestamp === 'undefined'
+            ? Date.now()
+            : typeof m.timestamp === 'string' || typeof m.timestamp === 'number'
+            ? m.timestamp
+            : m.timestamp instanceof Date
+            ? m.timestamp.getTime()
+            : m.timestamp,
+      }));
+      const updated: ChatSession = {
+        ...current,
+        title: title || current.title,
+        messages: normalizedMessages,
+        updatedAt: Date.now(),
+      };
+      const next = upsertChat(prev.filter(c => c.id !== activeChatId), updated);
+      saveChats(next);
+      return next;
+    });
+  }, [messages, activeChatId]);
+
+  // Filter messages by current mode (default old messages without mode => learn)
+  const visibleMessages = useMemo(() => {
+    return (messages || []).filter(m => (((m as any).mode ?? 'learn') === mode));
+  }, [messages, mode]);
+
+  // Autoscroll (also on mode switch)
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading, mode]);
+
+  // Inject prompt on first load of a fresh session
+  useEffect(() => {
+    const prompt = searchParams.get('prompt');
+    if (prompt && messages.length === 0) {
+      setInputValue(prompt);
+      const t = setTimeout(() => handleSubmit(prompt), 400);
+      return () => clearTimeout(t);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-resize input
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = '0px';
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [inputValue, isSending]);
+
+  const handleSubmit = useCallback(async (customInput?: string) => {
+    const input = (customInput ?? inputValue).trim();
+    if (!input || isSending || !activeChatId) return;
 
     setIsSending(true);
-    const userMessage: Message = {
+    setShowQuickActions(false);
+
+    // Tag user message with mode
+    const userMessage: ChatMessageType = {
       id: Date.now(),
       sender: 'user',
       content: input,
       timestamp: new Date(),
-      difficulty: getDifficultyFromInput(input),
-      readTime: Math.ceil(input.split(' ').length / 200),
-      tags: extractTagsFromInput(input)
-    };
+    } as any;
+    (userMessage as any).mode = mode;
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
 
-    // Simulate AI response with enhanced features
-    setTimeout(() => {
-      const aiResponse = generateAdvancedAIResponse(input);
-      setMessages(prev => [...prev, aiResponse]);
-      setTotalXP(prev => prev + (aiResponse.pointsEarned || 0));
-      setIsLoading(false);
-      
-      if (aiResponse.achievements && aiResponse.achievements.length > 0) {
-        aiResponse.achievements.forEach(achievement => {
-          toast.success(`🏆 Achievement: ${achievement}`, {
-            duration: 4000,
-            className: 'bg-gradient-to-r from-yellow-500 to-orange-500'
-          });
-        });
+    // Abort any in-flight request
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
+
+    try {
+      const response = await fetch(`${API_URL}/process-content`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: input, files: [] }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server error ${response.status}`);
       }
 
-      submitTimeoutRef.current = setTimeout(() => {
-        setIsSending(false);
-      }, 1000);
-    }, 2000);
-  }, [inputValue, isSending]);
+      const data = await response.json();
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
+      if (data?.status === 'success') {
+        if (mode === 'quiz') {
+          const quizMsg: ChatMessageType = {
+            id: Date.now() + 1,
+            sender: 'ai',
+            content: data.response, // quiz content based on API answer
+            timestamp: new Date(),
+          } as any;
+          (quizMsg as any).mode = 'quiz';
+          (quizMsg as any).forceQuiz = true; // render as quiz-only
+          setMessages(prev => [...prev, quizMsg]);
+        } else {
+          const aiMessage: ChatMessageType = {
+            id: Date.now() + 1,
+            sender: 'ai',
+            content: data.response,
+            mermaidChart: data.mermaidChart,
+            timestamp: new Date(),
+          } as any;
+          (aiMessage as any).mode = 'learn';
+          setMessages(prev => [...prev, aiMessage]);
+        }
+      } else {
+        // Fallbacks
+        if (mode === 'quiz') {
+          const quizMsg: ChatMessageType = {
+            id: Date.now() + 1,
+            sender: 'ai',
+            content: input,
+            timestamp: new Date(),
+          } as any;
+          (quizMsg as any).mode = 'quiz';
+          (quizMsg as any).forceQuiz = true;
+          setMessages(prev => [...prev, quizMsg]);
+        } else {
+          notify('Sorry, an error occurred. Please try again.', 'error');
+        }
+      }
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        if (mode === 'quiz') {
+          const quizMsg: ChatMessageType = {
+            id: Date.now() + 1,
+            sender: 'ai',
+            content: input,
+            timestamp: new Date(),
+          } as any;
+          (quizMsg as any).mode = 'quiz';
+          (quizMsg as any).forceQuiz = true;
+          setMessages(prev => [...prev, quizMsg]);
+          notify('Network issue; generated quiz from your prompt text.', 'error');
+        } else {
+          notify('Connection failed. Please check your network.', 'error');
+        }
+      }
+    } finally {
+      setIsLoading(false);
+      setIsSending(false);
+      inputRef.current?.focus();
     }
+  }, [inputValue, isSending, activeChatId, mode]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSubmit();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowQuickActions(prev => !prev);
+      }
+    },
+    [handleSubmit]
+  );
+
+  // Chat session actions
+  const createNewChat = () => {
+    const fresh = newChatSession();
+    const nextList = upsertChat(chats, fresh);
+    saveChats(nextList);
+    setChats(nextList);
+    setActiveId(fresh.id);
+    persistActiveChatId(fresh.id);
+    setMessages([]);
   };
 
-  // Toggle voice input
-  const toggleVoiceInput = () => {
-    setIsListening(!isListening);
-    // Voice input logic would go here
+  const openChat = (id: string) => {
+    if (id === activeChatId) return;
+    const target = chats.find(c => c.id === id);
+    if (!target) return;
+    setActiveId(id);
+    persistActiveChatId(id);
+    setMessages((target.messages || []) as ChatMessageType[]);
+  };
+
+  const clearActiveChat = () => {
+    if (!activeChatId) return;
+    setMessages([]);
+    notify('Chat cleared');
+  };
+
+  const deleteChat = (id: string) => {
+    const next = removeChat(chats, id);
+    saveChats(next);
+    setChats(next);
+    if (activeChatId === id) {
+      const fallback = next[0] || newChatSession();
+      if (!next.length) {
+        const arr = [fallback];
+        saveChats(arr);
+        setChats(arr);
+      }
+      setActiveId(fallback.id);
+      persistActiveChatId(fallback.id);
+      setMessages(next[0]?.messages as ChatMessageType[] || []);
+    }
+    notify('Chat deleted');
+  };
+
+  // ----------------------
+  // Chat Message Component
+  // ----------------------
+  const ChatMessage = memo(({ message }: { message: ChatMessageType }) => {
+    const isUser = message.sender === 'user';
+    const [showVisuals, setShowVisuals] = useState(!!(message as any).mermaidChart);
+    const [showQuiz, setShowQuiz] = useState(false);
+
+    const forceQuiz = !!(message as any).forceQuiz;
+    const hasAIQuiz = !isUser && message.content && message.content.trim().length > 0;
+
+    if (!isUser && forceQuiz) {
+      return (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="group max-w-4xl mx-auto flex items-start gap-4 md:gap-5 my-6 md:my-8 px-2 sm:px-0"
+        >
+          <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 mt-1 shadow-sm bg-slate-800" aria-hidden>
+            <Bot size={20} className="text-white" />
+          </div>
+          <div className="flex-1">
+            <motion.div
+              initial={{ opacity: 0, height: 0, marginTop: 0 }}
+              animate={{ opacity: 1, height: 'auto', marginTop: '0px' }}
+              className="bg-white border border-slate-200/80 rounded-xl overflow-hidden shadow-sm"
+            >
+              <Quiz text={message.content} />
+            </motion.div>
+          </div>
+        </motion.div>
+      );
+    }
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="group max-w-4xl mx-auto flex items-start gap-4 md:gap-5 my-6 md:my-8 px-2 sm:px-0"
+      >
+        <div
+          className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 mt-1 shadow-sm ${
+            isUser ? 'bg-slate-700' : 'bg-slate-800'
+          }`}
+          aria-hidden
+        >
+          {isUser ? <UserIcon size={20} className="text-white" /> : <Bot size={20} className="text-white" />}
+        </div>
+
+        <div className="flex-1">
+          {!isUser && (
+            <div className="prose max-w-none text-slate-800">
+              <ReactMarkdown components={markdownComponents as any}>
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
+          {isUser && (
+            <div className="text-slate-700 whitespace-pre-wrap">{message.content}</div>
+          )}
+
+          {!isUser && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.12 }}
+              className="mt-4 flex items-center gap-4"
+            >
+              {(message as any).mermaidChart && (
+                <button
+                  type="button"
+                  onClick={() => setShowVisuals(v => !v)}
+                  className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800 transition-colors font-medium"
+                >
+                  <GitBranch size={16} />
+                  <span>{showVisuals ? 'Hide' : 'Show'} Flowchart</span>
+                </button>
+              )}
+
+              {hasAIQuiz && (
+                <button
+                  type="button"
+                  onClick={() => setShowQuiz(v => !v)}
+                  className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800 transition-colors font-medium"
+                >
+                  <Brain size={16} />
+                  <span>{showQuiz ? 'Hide' : 'Quiz me'}</span>
+                </button>
+              )}
+            </motion.div>
+          )}
+
+          {showVisuals && !isUser && (message as any).mermaidChart && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, marginTop: 0 }}
+              animate={{ opacity: 1, height: 'auto', marginTop: '16px' }}
+              className="bg-white border border-solid border-slate-200/80 rounded-xl overflow-hidden shadow-sm"
+            >
+              <div className="p-5">
+                <MermaidDiagram chart={(message as any).mermaidChart as string} />
+              </div>
+            </motion.div>
+          )}
+
+          {showQuiz && !isUser && hasAIQuiz && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, marginTop: 0 }}
+              animate={{ opacity: 1, height: 'auto', marginTop: '16px' }}
+              className="bg-white border border-slate-200/80 rounded-xl overflow-hidden shadow-sm"
+            >
+              <Quiz text={message.content} />
+            </motion.div>
+          )}
+        </div>
+      </motion.div>
+    );
+  });
+  ChatMessage.displayName = 'ChatMessage';
+
+  // ----------------------
+  // Empty State
+  // ----------------------
+  const EmptyState = () => (
+    <div className="text-center py-20 md:py-24 px-4">
+      <motion.div
+        initial={{ opacity: 0, y: 16, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.45 }}
+        className="max-w-2xl mx-auto"
+      >
+        <div className="w-24 h-24 bg-slate-800 rounded-3xl mx-auto mb-8 flex items-center justify-center shadow-md">
+          <Sparkles size={48} className="text-white" />
+        </div>
+
+        <h1 className="text-5xl font-bold text-slate-900 mb-4 tracking-tight">
+          {mode === 'quiz' ? 'Quiz Mode' : 'Learning Starts Here'}
+        </h1>
+        <p className="text-lg text-slate-600 mb-10">
+          {mode === 'quiz'
+            ? 'Type a topic or paste content. I will generate a focused quiz from it.'
+            : 'Ask me anything. I can help you understand complex topics, visualize data, and more.'}
+        </p>
+
+        {mode === 'learn' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-left">
+            {[
+              { title: 'Explain a Concept', prompt: "Explain quantum computing to me like I'm five." },
+              { title: 'Visualize a Process', prompt: 'Visualize the process of photosynthesis for me.' },
+              { title: 'Write Code', prompt: 'Show me a Python code example for a simple web scraper.' },
+              { title: 'Draft Content', prompt: 'Draft an email to my team about the new project timeline.' },
+            ].map((item, index) => (
+              <motion.button
+                key={item.title}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.12 + index * 0.06 }}
+                onClick={() => handleSubmit(item.prompt)}
+                className="p-4 bg-white border border-slate-200 rounded-lg hover:border-slate-300 hover:bg-slate-50/80 active:scale-[0.99] transition-all text-left"
+                type="button"
+              >
+                <div className="font-semibold text-slate-800">{item.title}</div>
+                <div className="text-sm text-slate-500 mt-1">{item.prompt}</div>
+              </motion.button>
+            ))}
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+
+  // Sidebar chat list item
+  const ChatListItem = ({
+    chat,
+    active,
+    onOpen,
+    onDelete,
+  }: {
+    chat: ChatSession;
+    active: boolean;
+    onOpen: () => void;
+    onDelete: () => void;
+  }) => {
+    return (
+      <div
+        className={`group flex items-center gap-2 p-2 rounded-lg border transition-all cursor-pointer ${
+          active
+            ? 'bg-slate-100 border-slate-300'
+            : 'bg-white border-slate-200 hover:bg-slate-50'
+        }`}
+        onClick={onOpen}
+        title={chat.title}
+      >
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-slate-800 truncate">{chat.title || 'New chat'}</div>
+          <div className="text-[11px] text-slate-500">{formatRelTime(chat.updatedAt)}</div>
+        </div>
+        <button
+          className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          aria-label="Delete chat"
+          title="Delete chat"
+        >
+          <Trash2 size={14} className="text-red-500" />
+        </button>
+      </div>
+    );
   };
 
   return (
-    <div className={`min-h-screen transition-all duration-300 ${
-      darkMode 
-        ? 'bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900' 
-        : 'bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50'
-    } ${focusMode ? 'pt-0' : 'pt-4'}`}>
-      
-      {/* Animated Background Elements */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
-        <div className="absolute -top-40 -left-40 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute top-1/3 -right-40 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
-        <div className="absolute bottom-0 left-1/3 w-64 h-64 bg-green-500/10 rounded-full blur-3xl animate-pulse delay-2000"></div>
-      </div>
-
-      <div className="relative z-10 flex h-[calc(100vh-1rem)]">
-        
-        {/* Advanced Sidebar */}
-        <AnimatePresence>
-          <motion.div 
-            initial={false}
-            animate={{ 
-              width: sidebarMode === 'collapsed' ? 60 : sidebarMode === 'compact' ? 280 : 400,
-              opacity: 1 
-            }}
-            transition={{ duration: 0.3, ease: "easeOut" }}
-            className={`${darkMode ? 'bg-gray-900/95' : 'bg-white/95'} backdrop-blur-xl border-r ${
-              darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
-            } flex flex-col relative shadow-2xl`}
-          >
-            
-            {/* Sidebar Header */}
-            <div className="p-4 border-b border-gray-700/30">
-              <div className="flex items-center justify-between mb-4">
-                {sidebarMode !== 'collapsed' && (
-                  <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="flex items-center space-x-3"
-                  >
-                    <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-xl flex items-center justify-center">
-                      <Brain className="text-white" size={20} />
-                    </div>
-                    <div>
-                      <h2 className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                        Neural Learn
-                      </h2>
-                      <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                        AI-Powered Learning
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
-                
+    <ToastProvider>
+      <div className="min-h-screen bg-slate-50 font-sans">
+        {/* Header */}
+        <header className="sticky top-0 z-40 bg-white/60 backdrop-blur-xl border-b border-slate-200/60">
+          <div className="max-w-6xl mx-auto px-6 relative">
+            {/* Centered segmented control (Learn | Quiz) */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div
+                className="pointer-events-auto inline-flex items-center gap-1 bg-white/85 backdrop-blur border border-slate-200 rounded-full p-1 shadow-md"
+                role="tablist"
+                aria-label="Mode switcher"
+              >
                 <button
-                  onClick={() => setSidebarMode(
-                    sidebarMode === 'collapsed' ? 'compact' : 
-                    sidebarMode === 'compact' ? 'expanded' : 'collapsed'
-                  )}
-                  className={`p-2 rounded-lg transition-colors ${
-                    darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+                  type="button"
+                  onClick={() => setMode('learn')}
+                  role="tab"
+                  aria-selected={mode === 'learn'}
+                  className={`px-4 md:px-5 py-2 md:py-2.5 rounded-full text-sm md:text-base font-semibold transition-all flex items-center gap-2 min-w-[96px] justify-center ${
+                    mode === 'learn'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-700 hover:text-slate-900'
                   }`}
                 >
-                  <Menu size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+                  <span aria-hidden>📚</span>
+                  <span>Learn</span>
                 </button>
-              </div>
-
-              {/* User Stats Card */}
-              {sidebarMode !== 'collapsed' && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-gradient-to-br from-purple-600/20 to-blue-600/20 backdrop-blur-sm rounded-xl p-4 border border-purple-500/20"
+                <button
+                  type="button"
+                  onClick={() => setMode('quiz')}
+                  role="tab"
+                  aria-selected={mode === 'quiz'}
+                  className={`px-4 md:px-5 py-2 md:py-2.5 rounded-full text-sm md:text-base font-semibold transition-all flex items-center gap-2 min-w-[96px] justify-center ${
+                    mode === 'quiz'
+                      ? 'bg-violet-600 text-white shadow-sm'
+                      : 'text-slate-700 hover:text-slate-900'
+                  }`}
                 >
-                  <div className="flex items-center space-x-3 mb-3">
-                    <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
-                      <User size={20} className="text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <p className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                        Alex Learner
-                      </p>
-                      <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                        Level 12 Explorer
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span className={darkMode ? 'text-gray-300' : 'text-gray-700'}>XP Progress</span>
-                        <span className={`font-semibold ${darkMode ? 'text-purple-400' : 'text-purple-600'}`}>
-                          {totalXP.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className={`w-full h-2 rounded-full ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                        <motion.div 
-                          className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
-                          initial={{ width: 0 }}
-                          animate={{ width: '68%' }}
-                          transition={{ duration: 1, delay: 0.5 }}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3 text-center">
-                      <div className={`p-2 rounded-lg ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
-                        <div className="flex items-center justify-center space-x-1 mb-1">
-                          <Zap size={14} className="text-yellow-500" />
-                          <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                            {learningStreak}
-                          </span>
-                        </div>
-                        <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Day Streak</p>
-                      </div>
-                      <div className={`p-2 rounded-lg ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'}`}>
-                        <div className="flex items-center justify-center space-x-1 mb-1">
-                          <Trophy size={14} className="text-orange-500" />
-                          <span className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>24</span>
-                        </div>
-                        <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Badges</p>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </div>
-
-            {/* Quick Actions */}
-            {sidebarMode !== 'collapsed' && (
-              <div className="p-4 space-y-3">
-                <h3 className={`text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-3`}>
-                  Quick Actions
-                </h3>
-                <div className="space-y-2">
-                  {[
-                    { icon: Rocket, label: 'New Challenge', color: 'from-red-500 to-orange-500' },
-                    { icon: BookOpen, label: 'Study Guide', color: 'from-green-500 to-emerald-500' },
-                    { icon: Globe, label: 'Explore Topics', color: 'from-blue-500 to-cyan-500' },
-                    { icon: Code, label: 'Practice Code', color: 'from-purple-500 to-pink-500' }
-                  ].map((action, idx) => (
-                    <button
-                      key={idx}
-                      className={`w-full flex items-center space-x-3 p-3 rounded-lg transition-all duration-200 ${
-                        darkMode ? 'hover:bg-gray-800/50' : 'hover:bg-gray-100/50'
-                      } group hover:scale-105`}
-                    >
-                      <div className={`w-8 h-8 bg-gradient-to-r ${action.color} rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform`}>
-                        <action.icon size={16} className="text-white" />
-                      </div>
-                      <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                        {action.label}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Recent Topics */}
-            {sidebarMode === 'expanded' && (
-              <div className="p-4 flex-1">
-                <h3 className={`text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-3`}>
-                  Recent Topics
-                </h3>
-                <div className="space-y-2">
-                  {['React Architecture', 'Machine Learning', 'Quantum Physics', 'Data Structures'].map((topic, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded-lg cursor-pointer transition-all ${
-                        darkMode ? 'hover:bg-gray-800/50' : 'hover:bg-gray-100/50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                          {topic}
-                        </span>
-                        <div className="flex items-center space-x-1">
-                          <Clock size={12} className={darkMode ? 'text-gray-500' : 'text-gray-400'} />
-                          <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                            {idx + 1}h
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Settings */}
-            <div className="p-4 border-t border-gray-700/30">
-              <div className="flex items-center space-x-2">
-                {sidebarMode !== 'collapsed' && (
-                  <>
-                    <button
-                      onClick={() => setDarkMode(!darkMode)}
-                      className={`p-2 rounded-lg transition-colors ${
-                        darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-                      }`}
-                    >
-                      <div className="w-5 h-5 rounded-full bg-gradient-to-r from-orange-400 to-yellow-400"></div>
-                    </button>
-                    <button
-                      onClick={() => setFocusMode(!focusMode)}
-                      className={`p-2 rounded-lg transition-colors ${
-                        darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-                      }`}
-                    >
-                      <Eye size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
-                    </button>
-                  </>
-                )}
-                <button className={`p-2 rounded-lg transition-colors ${
-                  darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-                }`}>
-                  <Settings size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+                  <span aria-hidden>🧠</span>
+                  <span>Quiz</span>
                 </button>
               </div>
             </div>
-          </motion.div>
-        </AnimatePresence>
 
-        {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col">
-          
-          {/* Enhanced Header */}
-          <motion.div 
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`${darkMode ? 'bg-gray-900/95' : 'bg-white/95'} backdrop-blur-xl border-b ${
-              darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
-            } p-4 shadow-lg`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <button className={`p-2 rounded-lg transition-colors ${
-                  darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'
-                }`}>
-                  <ArrowLeft size={20} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+            <div className="flex items-center justify-between h-16 md:h-20">
+              {/* Left cluster */}
+              <div className="flex items-center gap-3">
+                {/* Mobile sidebar toggle */}
+                <button
+                  type="button"
+                  aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+                  onClick={() => setSidebarOpen(v => !v)}
+                  className="lg:hidden mr-1 rounded-lg p-2 hover:bg-slate-100 text-slate-700"
+                >
+                  {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
                 </button>
-                
-                <div className="flex items-center space-x-3">
-                  <div className="relative">
-                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
-                      <Bot size={24} className="text-white" />
-                    </div>
-                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
-                  </div>
-                  <div>
-                    <h1 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      Neural Assistant
-                    </h1>
-                    <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'} flex items-center space-x-2`}>
-                      <Sparkles size={12} />
-                      <span>Ready for advanced learning</span>
-                    </p>
-                  </div>
-                </div>
+
+                <Bot size={24} className="text-slate-800" />
+                <span className="font-bold text-xl text-slate-900">Tayyari</span>
               </div>
 
-              <div className="flex items-center space-x-3">
-                <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${
-                  darkMode 
-                    ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
-                    : 'bg-green-100 text-green-700 border border-green-200'
-                }`}>
-                  <div className="flex items-center space-x-1">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span>Online</span>
+              {/* Right cluster */}
+              {user && (
+                <div className="flex items-center gap-4">
+                  <div
+                    className="hidden sm:flex items-center gap-2 text-base text-slate-600 px-3.5 py-2 bg-white border border-slate-200/80 rounded-lg"
+                    title={`Welcome, ${user.firstName ?? ''}`}
+                  >
+                    <UserIcon size={16} className="text-slate-500" />
+                    <span className="font-medium text-slate-800">{user.firstName}</span>
                   </div>
-                </div>
-                
-                <div className="flex items-center space-x-1">
-                  <button className={`p-2 rounded-lg transition-colors ${
-                    darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'
-                  }`}>
-                    <Bookmark size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
-                  </button>
-                  <button className={`p-2 rounded-lg transition-colors ${
-                    darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'
-                  }`}>
-                    <Share2 size={18} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
+                  <button className="text-slate-500 hover:text-slate-800 transition-colors" aria-label="Open settings">
+                    <Settings size={20} />
                   </button>
                 </div>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Messages Area with Advanced Features */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-            <div className="max-w-5xl mx-auto">
-              
-              {messages.length === 0 ? (
-                <WelcomeScreen darkMode={darkMode} onExampleClick={setInputValue} />
-              ) : (
-                messages.map((message) => (
-                  <AdvancedMessageComponent 
-                    key={message.id} 
-                    message={message} 
-                    darkMode={darkMode}
-                  />
-                ))
               )}
-
-              {/* Enhanced Loading Animation */}
-              {isLoading && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex justify-start"
-                >
-                  <div className="flex space-x-4 max-w-4xl">
-                    <div className="flex-shrink-0">
-                      <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-xl flex items-center justify-center">
-                        <Bot size={20} className="text-white" />
-                      </div>
-                    </div>
-                    <div className={`${
-                      darkMode ? 'bg-gray-800/50' : 'bg-white/50'
-                    } backdrop-blur-sm border ${
-                      darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
-                    } rounded-2xl p-6 flex-1`}>
-                      <div className="flex items-center space-x-3 mb-4">
-                        <div className="flex space-x-2">
-                          {[0, 1, 2].map(i => (
-                            <motion.div
-                              key={i}
-                              className="w-3 h-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
-                              animate={{
-                                scale: [1, 1.2, 1],
-                                opacity: [0.5, 1, 0.5]
-                              }}
-                              transition={{
-                                duration: 1.5,
-                                repeat: Infinity,
-                                delay: i * 0.2
-                              }}
-                            />
-                          ))}
-                        </div>
-                        <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                          Analyzing and generating visual insights...
-                        </span>
-                      </div>
-                      
-                      <div className="space-y-3">
-                        {['Processing your question', 'Searching knowledge base', 'Generating diagrams', 'Preparing response'].map((step, idx) => (
-                          <motion.div
-                            key={idx}
-                            initial={{ opacity: 0.3 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ delay: idx * 0.5 }}
-                            className="flex items-center space-x-3"
-                          >
-                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                            <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                              {step}
-                            </span>
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              <div ref={messagesEndRef} />
             </div>
           </div>
+        </header>
 
-          {/* Advanced Input Area */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`border-t ${darkMode ? 'border-gray-700/50' : 'border-gray-200/50'} ${
-              darkMode ? 'bg-gray-900/95' : 'bg-white/95'
-            } backdrop-blur-xl p-6`}
-          >
-            <div className="max-w-5xl mx-auto">
-              
-              {/* Input Suggestions */}
-              {inputValue.length === 0 && (
-                <div className="mb-4">
-                  <div className="flex items-center space-x-2 mb-3">
-                    <Lightbulb size={16} className={`${darkMode ? 'text-yellow-400' : 'text-yellow-600'}`} />
-                    <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                      Quick Suggestions
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      '🧬 Explain DNA replication with diagrams',
-                      '⚛️ Show me quantum mechanics visually',
-                      '🚀 How does rocket propulsion work?',
-                      '🧠 Break down machine learning algorithms'
-                    ].map((suggestion, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => setInputValue(suggestion.substring(2))}
-                        className={`px-3 py-2 text-sm rounded-lg transition-all hover:scale-105 ${
-                          darkMode 
-                            ? 'bg-gray-800/50 hover:bg-gray-700/50 text-gray-300 border border-gray-700/50' 
-                            : 'bg-gray-100/50 hover:bg-gray-200/50 text-gray-700 border border-gray-200/50'
-                        }`}
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
+        {/* Fixed slim sidebar near the left edge (desktop only), vertically centered */}
+        <aside
+          className="hidden lg:block fixed left-3 top-[64px] md:top-[80px] w-64 z-30"
+          aria-label="Sidebar"
+        >
+          <div className="h-[calc(100vh-64px-12px)] md:h-[calc(100vh-80px-12px)] overflow-y-auto pr-2">
+            <div className="min-h-full flex flex-col justify-center gap-4 py-6">
+              {/* Chats list card */}
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="p-4 border-b border-slate-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-slate-900 font-semibold">
+                      <Sparkles size={16} className="text-violet-600" />
+                      <span>Chats</span>
+                    </div>
+                    <button
+                      className="inline-flex items-center gap-1 text-sm text-slate-700 hover:text-slate-900"
+                      onClick={createNewChat}
+                      title="Start a new chat"
+                    >
+                      <PlusCircle size={16} />
+                      New
+                    </button>
                   </div>
                 </div>
-              )}
+                <div className="p-3 space-y-2">
+                  {chats.map(c => (
+                    <ChatListItem
+                      key={c.id}
+                      chat={c}
+                      active={c.id === activeChatId}
+                      onOpen={() => openChat(c.id)}
+                      onDelete={() => deleteChat(c.id)}
+                    />
+                  ))}
+                  {chats.length === 0 && (
+                    <div className="text-xs text-slate-500 px-2 py-1.5">No chats yet.</div>
+                  )}
+                </div>
+              </div>
 
-              {/* Main Input */}
-              <div className={`relative rounded-2xl border ${
-                darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
-              } ${darkMode ? 'bg-gray-800/50' : 'bg-white/50'} backdrop-blur-sm overflow-hidden`}>
-                
-                {/* Input Tools Bar */}
-                <div className={`flex items-center justify-between px-4 py-2 border-b ${
-                  darkMode ? 'border-gray-700/30' : 'border-gray-200/30'
-                }`}>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={toggleVoiceInput}
-                      className={`p-2 rounded-lg transition-all ${
-                        isListening 
-                          ? 'bg-red-500/20 text-red-400' 
-                          : darkMode 
-                            ? 'hover:bg-gray-700 text-gray-400' 
-                            : 'hover:bg-gray-100 text-gray-600'
-                      }`}
-                    >
-                      {isListening ? <MicOff size={16} /> : <Mic size={16} />}
-                    </button>
-                    <button className={`p-2 rounded-lg transition-colors ${
-                      darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'
-                    }`}>
-                      <FileText size={16} />
-                    </button>
-                    <button className={`p-2 rounded-lg transition-colors ${
-                      darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'
-                    }`}>
-                      <Code size={16} />
-                    </button>
+              {/* Actions card */}
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="p-4 border-b border-slate-200">
+                  <div className="flex items-center gap-2 text-slate-900 font-semibold">
+                    <Sparkles size={16} className="text-violet-600" />
+                    <span>Actions</span>
                   </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                      {inputValue.length}/2000
-                    </span>
-                    <div className="flex items-center space-x-1">
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                      <span className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                        Neural AI Ready
-                      </span>
+                </div>
+                <div className="p-4 space-y-2">
+                  <SidebarButton
+                    icon={<ExternalLink size={18} className="text-slate-700" />}
+                    label="Leaderboard"
+                    onClick={() => window.open('/leaderboard', '_blank', 'noopener,noreferrer')}
+                  />
+                  <SidebarButton
+                    icon={<Trash2 size={18} className="text-red-600" />}
+                    label="Clear current chat"
+                    variant="danger"
+                    onClick={clearActiveChat}
+                  />
+                </div>
+                <div className="px-4 pb-4 pt-2 border-t border-slate-200">
+                  <SidebarButton
+                    icon={<LogOut size={18} className="text-slate-700" />}
+                    label="Logout"
+                    variant="link"
+                    onClick={async () => {
+                      try {
+                        await signOut();
+                      } catch {
+                        notify('Logout failed', 'error');
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Helpful tips */}
+              <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4">
+                <div className="text-sm text-slate-700 font-semibold mb-2">Shortcuts</div>
+                <ul className="text-sm text-slate-600 space-y-1.5">
+                  <li>Enter to send</li>
+                  <li>Shift+Enter for newline</li>
+                  <li>Cmd/Ctrl+K quick actions</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        {/* Mobile Sidebar Drawer (centered content) */}
+        <AnimatePresence>
+          {sidebarOpen && (
+            <motion.div
+              key="drawer"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="lg:hidden fixed inset-0 z-40"
+              aria-label="Mobile sidebar"
+            >
+              <div className="absolute inset-0 bg-slate-900/30" onClick={() => setSidebarOpen(false)} />
+              <div className="absolute left-0 top-[64px] md:top-[80px] bottom-0 w-[18rem] bg-white border-r border-slate-200 shadow-xl overflow-y-auto">
+                <div className="min-h-full flex flex-col justify-center gap-4 p-4">
+                  {/* Actions */}
+                  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="p-4 border-b border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-semibold text-slate-900">
+                          <Sparkles size={16} className="text-violet-600" />
+                          <span>Actions</span>
+                        </div>
+                        <button
+                          className="rounded-lg p-1.5 hover:bg-slate-100"
+                          onClick={() => setSidebarOpen(false)}
+                          aria-label="Close sidebar"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-4 space-y-2">
+                      <SidebarButton
+                        icon={<ExternalLink size={18} className="text-slate-700" />}
+                        label="Leaderboard"
+                        onClick={() => window.open('/leaderboard', '_blank', 'noopener,noreferrer')}
+                      />
+                      <SidebarButton
+                        icon={<Trash2 size={18} className="text-red-600" />}
+                        label="Clear current chat"
+                        variant="danger"
+                        onClick={() => {
+                          clearActiveChat();
+                          setSidebarOpen(false);
+                        }}
+                      />
+                      <SidebarButton
+                        icon={<LogOut size={18} className="text-slate-700" />}
+                        label="Logout"
+                        variant="link"
+                        onClick={async () => {
+                          try { await signOut(); } catch { notify('Logout failed', 'error'); }
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Chats list (mobile) */}
+                  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="p-4 border-b border-slate-200">
+                      <div className="flex items-center gap-2 text-slate-900 font-semibold">
+                        <Sparkles size={16} className="text-violet-600" />
+                        <span>Chats</span>
+                      </div>
+                    </div>
+                    <div className="p-3 space-y-2">
+                      {chats.map(c => (
+                        <div key={c.id} className="flex items-center gap-2">
+                          <button
+                            className={`flex-1 text-left text-sm px-2 py-1.5 rounded ${
+                              c.id === activeChatId ? 'bg-slate-100' : 'bg-white hover:bg-slate-50'
+                            }`}
+                            onClick={() => {
+                              openChat(c.id);
+                              setSidebarOpen(false);
+                            }}
+                          >
+                            <div className="truncate">{c.title || 'New chat'}</div>
+                            <div className="text-[11px] text-slate-500">{formatRelTime(c.updatedAt)}</div>
+                          </button>
+                          <button
+                            className="p-1 rounded hover:bg-red-50"
+                            onClick={() => deleteChat(c.id)}
+                            aria-label="Delete chat"
+                          >
+                            <Trash2 size={14} className="text-red-500" />
+                          </button>
+                        </div>
+                      ))}
+                      {chats.length === 0 && (
+                        <div className="text-xs text-slate-500 px-2 py-1.5">No chats yet.</div>
+                      )}
+                    </div>
+
+                    <div className="p-3 border-t border-slate-200">
+                      <button
+                        onClick={() => {
+                          createNewChat();
+                          setSidebarOpen(false);
+                        }}
+                        className="w-full flex items-center justify-center gap-2 text-sm font-medium px-3 py-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+                      >
+                        <PlusCircle size={16} />
+                        New chat
+                      </button>
                     </div>
                   </div>
                 </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-                {/* Text Input */}
-                <div className="flex items-end space-x-4 p-4">
-                  <div className="flex-1">
-                    <textarea
-                      ref={inputRef}
-                      value={inputValue}
-                      onChange={(e) => setInputValue(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder="🎯 Ask me anything! I'll provide diagrams, visuals, and interactive explanations..."
-                      className={`w-full bg-transparent border-none outline-none resize-none text-lg placeholder-gray-400 ${
-                        darkMode ? 'text-white' : 'text-gray-900'
-                      }`}
-                      rows={inputValue.split('\n').length || 1}
-                      maxLength={2000}
-                      disabled={isLoading || isSending}
-                    />
-                  </div>
-                  
-                  {/* Send Button */}
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => handleSubmit()}
-                    disabled={!inputValue.trim() || isLoading || isSending}
-                    className={`relative overflow-hidden px-6 py-3 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                      inputValue.trim() 
-                        ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-lg hover:shadow-purple-500/25' 
-                        : darkMode ? 'bg-gray-700 text-gray-400' : 'bg-gray-200 text-gray-500'
-                    }`}
-                  >
-                    {isSending ? (
-                      <div className="flex items-center space-x-2">
-                        <motion.div
-                          animate={{ rotate: 360 }}
-                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                          className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-                        />
-                        <span>Sending...</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center space-x-2">
-                        <Send size={16} />
-                        <span>Send</span>
-                      </div>
-                    )}
-                    
-                    {/* Animated background */}
-                    <motion.div
-                      className="absolute inset-0 bg-gradient-to-r from-purple-600/20 to-blue-600/20 rounded-xl"
-                      animate={{
-                        opacity: [0.2, 0.8, 0.2]
-                      }}
-                      transition={{
-                        duration: 2,
-                        repeat: Infinity,
-                        ease: "easeInOut"
-                      }}
-                    />
-                  </motion.button>
-                </div>
+        {/* Chat Area (centered container) */}
+        <main>
+          <div className="px-6 pt-8 pb-44 md:pb-48 min-h-[calc(100vh-64px)] md:min-h-[calc(100vh-80px)]">
+            {visibleMessages.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <div role="log" aria-live="polite" aria-relevant="additions" className="max-w-4xl mx-auto">
+                {visibleMessages.map(message => (
+                  <ChatMessage key={String(message.id)} message={message} />
+                ))}
 
-                {/* Smart Suggestions Based on Input */}
-                {inputValue.length > 0 && (
+                {isLoading && (
                   <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    className={`border-t ${darkMode ? 'border-gray-700/30' : 'border-gray-200/30'} p-3`}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-start gap-4 md:gap-5 my-6 md:my-8"
                   >
-                    <div className="flex items-center space-x-2 text-sm">
-                      <Brain size={14} className={darkMode ? 'text-purple-400' : 'text-purple-600'} />
-                      <span className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                        AI suggests: Include diagrams, visual examples, step-by-step breakdown
-                      </span>
+                    <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center flex-shrink-0 mt-1 shadow-sm">
+                      <Bot size={20} className="text-white" />
+                    </div>
+                    <div className="mt-3 flex items-center gap-3 text-slate-500">
+                      <Loader2 size={20} className="animate-spin" aria-hidden />
+                      <span className="text-base">Generating response...</span>
                     </div>
                   </motion.div>
                 )}
               </div>
-
-              {/* Quick Action Buttons */}
-              <div className="flex items-center justify-between mt-4">
-                <div className="flex items-center space-x-3">
-                  <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                    Quick actions:
-                  </span>
-                  <div className="flex items-center space-x-2">
-                    {[
-                      { icon: Target, label: 'Focus Mode', action: () => setFocusMode(!focusMode) },
-                      { icon: Coffee, label: 'Break Timer' },
-                      { icon: TrendingUp, label: 'Progress' }
-                    ].map((item, idx) => (
-                      <button
-                        key={idx}
-                        onClick={item.action}
-                        className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                          darkMode 
-                            ? 'hover:bg-gray-800 text-gray-400 hover:text-gray-300' 
-                            : 'hover:bg-gray-100 text-gray-600 hover:text-gray-700'
-                        }`}
-                      >
-                        <item.icon size={14} />
-                        <span>{item.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <span className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                    Powered by Neural AI
-                  </span>
-                  <div className="flex space-x-1">
-                    {[0, 1, 2].map(i => (
-                      <motion.div
-                        key={i}
-                        className="w-1.5 h-1.5 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
-                        animate={{
-                          scale: [1, 1.5, 1],
-                          opacity: [0.5, 1, 0.5]
-                        }}
-                        transition={{
-                          duration: 2,
-                          repeat: Infinity,
-                          delay: i * 0.3
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      </div>
-
-      {/* Floating Action Button */}
-      <AnimatePresence>
-        {focusMode && (
-          <motion.button
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={() => setFocusMode(false)}
-            className="fixed bottom-8 right-8 w-14 h-14 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center z-50"
-          >
-            <Maximize2 size={20} />
-          </motion.button>
-        )}
-      </AnimatePresence>
-
-      <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: ${darkMode ? '#4B5563' : '#D1D5DB'};
-          border-radius: 3px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: ${darkMode ? '#6B7280' : '#9CA3AF'};
-        }
-      `}</style>
-    </div>
-  );
-}
-
-// Welcome Screen Component
-interface WelcomeScreenProps {
-  darkMode: boolean;
-  onExampleClick: (question: string) => void;
-}
-const WelcomeScreen = ({ darkMode, onExampleClick }: WelcomeScreenProps) => (
-  <motion.div
-    initial={{ opacity: 0, y: 30 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.6, ease: "easeOut" }}
-    className="text-center py-12"
-  >
-    <div className="relative mb-8">
-      <motion.div
-        animate={{
-          rotate: [0, 360],
-          scale: [1, 1.1, 1]
-        }}
-        transition={{
-          duration: 20,
-          repeat: Infinity,
-          ease: "linear"
-        }}
-        className="w-24 h-24 mx-auto bg-gradient-to-br from-purple-500 via-blue-500 to-green-500 rounded-3xl flex items-center justify-center mb-6 relative overflow-hidden"
-      >
-        <Brain size={40} className="text-white relative z-10" />
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12 animate-pulse"></div>
-      </motion.div>
-      
-      {/* Floating particles */}
-      {[...Array(6)].map((_, i) => (
-        <motion.div
-          key={i}
-          className="absolute w-2 h-2 bg-purple-400 rounded-full"
-          style={{
-            left: `${30 + i * 10}%`,
-            top: `${20 + (i % 2) * 60}%`
-          }}
-          animate={{
-            y: [0, -20, 0],
-            opacity: [0.3, 1, 0.3],
-            scale: [1, 1.5, 1]
-          }}
-          transition={{
-            duration: 3,
-            repeat: Infinity,
-            delay: i * 0.5
-          }}
-        />
-      ))}
-    </div>
-
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ delay: 0.3 }}
-    >
-      <h2 className={`text-4xl font-bold mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-        Welcome to Neural Learning
-      </h2>
-      <p className={`text-xl mb-8 ${darkMode ? 'text-gray-300' : 'text-gray-600'} max-w-2xl mx-auto`}>
-        Experience AI-powered learning with interactive diagrams, visual explanations, and personalized insights
-      </p>
-    </motion.div>
-
-    {/* Feature Cards */}
-    <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto mb-12">
-      {[
-        {
-          icon: Layers,
-          title: 'Visual Diagrams',
-          description: 'Get complex concepts explained with interactive diagrams and architecture flows',
-          color: 'from-blue-500 to-cyan-500'
-        },
-        {
-          icon: Lightbulb,
-          title: 'Smart Insights',
-          description: 'AI analyzes your questions and provides contextual learning recommendations',
-          color: 'from-yellow-500 to-orange-500'
-        },
-        {
-          icon: Trophy,
-          title: 'Gamified Learning',
-          description: 'Earn XP, unlock achievements, and track your learning progress in real-time',
-          color: 'from-purple-500 to-pink-500'
-        }
-      ].map((feature, idx) => (
-        <motion.div
-          key={idx}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 + idx * 0.1 }}
-          className={`p-6 rounded-2xl ${
-            darkMode ? 'bg-gray-800/50' : 'bg-white/50'
-          } backdrop-blur-sm border ${
-            darkMode ? 'border-gray-700/50' : 'border-gray-200/50'
-          } hover:scale-105 transition-transform cursor-pointer`}
-        >
-          <div className={`w-12 h-12 bg-gradient-to-r ${feature.color} rounded-xl flex items-center justify-center mb-4 mx-auto`}>
-            <feature.icon size={24} className="text-white" />
+            )}
+            <div ref={chatEndRef} />
           </div>
-          <h3 className={`text-lg font-semibold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-            {feature.title}
-          </h3>
-          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-            {feature.description}
-          </p>
-        </motion.div>
-      ))}
-    </div>
 
-    {/* Example Questions */}
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ delay: 0.8 }}
-      className="max-w-3xl mx-auto"
-    >
-      <h3 className={`text-lg font-semibold mb-6 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-        Try asking about:
-      </h3>
-      <div className="grid md:grid-cols-2 gap-4">
-        {[
-          {
-            emoji: '🧬',
-            title: 'Biology & Science',
-            question: 'Explain photosynthesis with detailed diagrams'
-          },
-          {
-            emoji: '💻',
-            title: 'Programming',
-            question: 'Show me React component architecture with visual flow'
-          },
-          {
-            emoji: '⚛️',
-            title: 'Physics',
-            question: 'Break down quantum mechanics with visual examples'
-          },
-          {
-            emoji: '🏛️',
-            title: 'History',
-            question: 'Ancient Rome: government structure and society'
-          }
-        ].map((example, idx) => (
-          <motion.button
-            key={idx}
-            onClick={() => onExampleClick(example.question)}
-            whileHover={{ scale: 1.02, y: -2 }}
-            whileTap={{ scale: 0.98 }}
-            className={`text-left p-4 rounded-xl ${
-              darkMode ? 'bg-gray-800/30 hover:bg-gray-700/30' : 'bg-gray-100/30 hover:bg-gray-200/30'
-            } border ${
-              darkMode ? 'border-gray-700/30' : 'border-gray-200/30'
-            } transition-all group`}
-          >
-            <div className="flex items-start space-x-3">
-              <span className="text-2xl">{example.emoji}</span>
-              <div>
-                <h4 className={`font-medium mb-1 ${darkMode ? 'text-white' : 'text-gray-900'} group-hover:text-purple-500 transition-colors`}>
-                  {example.title}
-                </h4>
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  {example.question}
+          {/* Composer bar */}
+          <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-slate-50 via-slate-50/95 to-slate-50/0">
+            <div className="max-w-4xl mx-auto px-6 pb-6 pt-8">
+              <div className="relative">
+                <AnimatePresence initial={false}>
+                  {showQuickActions && mode === 'learn' && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="absolute bottom-full left-0 w-full grid grid-cols-2 md:grid-cols-4 gap-3 mb-3"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setInputValue('Explain... ')}
+                        className="quick-action-btn"
+                      >
+                        <Brain size={16} />
+                        Explain
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInputValue('Write code for... ')}
+                        className="quick-action-btn"
+                      >
+                        <Code size={16} />
+                        Write Code
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInputValue('Draft a... ')}
+                        className="quick-action-btn"
+                      >
+                        <PenLine size={16} />
+                        Draft Content
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearActiveChat();
+                        }}
+                        className="quick-action-btn !text-red-500 hover:!bg-red-50 hover:!border-red-200"
+                      >
+                        <Trash2 size={16} />
+                        Clear Chat
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickActions(v => !v)}
+                    className={`absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full transition-all ${mode === 'learn' ? 'bg-slate-100 hover:bg-slate-200' : 'bg-violet-100 hover:bg-violet-200'}`}
+                    aria-label={showQuickActions ? 'Close quick actions' : 'Open quick actions'}
+                  >
+                    <Plus
+                      size={18}
+                      className={`transition-transform ${showQuickActions ? 'rotate-45' : ''} ${mode === 'learn' ? 'text-slate-600' : 'text-violet-700'}`}
+                    />
+                  </button>
+
+                  <textarea
+                    ref={inputRef}
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={mode === 'quiz' ? 'Ask a topic to quiz on…' : 'Ask anything...'}
+                    className={`w-full pl-14 pr-14 py-3.5 border rounded-xl shadow-sm resize-none focus:outline-none focus:ring-2 transition-all placeholder-slate-400 text-base ${
+                      mode === 'quiz'
+                        ? 'bg-white border-violet-300 focus:ring-violet-500 focus:border-violet-500'
+                        : 'bg-white border-slate-300 focus:ring-blue-500 focus:border-blue-500'
+                    }`}
+                    rows={1}
+                    maxLength={8000}
+                    disabled={isSending}
+                    aria-label="Message input"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit()}
+                    disabled={!inputValue.trim() || isSending}
+                    className={`absolute bottom-2.5 right-2.5 w-10 h-10 rounded-lg flex items-center justify-center transition-colors text-white ${
+                      isSending
+                        ? 'bg-slate-300'
+                        : mode === 'quiz'
+                        ? 'bg-violet-700 hover:bg-violet-800'
+                        : 'bg-slate-800 hover:bg-slate-900'
+                    }`}
+                    aria-label="Send message"
+                  >
+                    {isSending ? <Loader2 size={20} className="animate-spin" /> : <Send size={18} />}
+                  </button>
+                </div>
+
+                <p className="mt-2 text-xs text-slate-500">
+                  Press Enter to send • Shift+Enter for a new line • Cmd/Ctrl+K for quick actions
                 </p>
               </div>
             </div>
-          </motion.button>
-        ))}
+          </div>
+        </main>
       </div>
-    </motion.div>
-  </motion.div>
-);
 
-// Advanced Message Component
-interface AdvancedMessageComponentProps {
-  message: Message;
-  darkMode: boolean;
-}
-const AdvancedMessageComponent = ({ message, darkMode }: AdvancedMessageComponentProps) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [reaction, setReaction] = useState<string | null>(null);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className={`group flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} mb-6`}
-    >
-      <div className={`flex space-x-4 max-w-4xl w-full ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
-        
-        {/* Avatar with Status */}
-        <div className="flex-shrink-0 relative">
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-            message.sender === 'user' 
-              ? 'bg-gradient-to-br from-purple-500 to-blue-500' 
-              : 'bg-gradient-to-br from-blue-500 via-purple-500 to-green-500'
-          } shadow-lg`}>
-            {message.sender === 'user' ? (
-              <User size={20} className="text-white" />
-            ) : (
-              <Bot size={20} className="text-white" />
-            )}
-          </div>
-          {message.sender === 'ai' && (
-            <motion.div
-              animate={{ scale: [1, 1.2, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full"
-            />
-          )}
-        </div>
-
-        {/* Message Content */}
-        <div className={`flex-1 rounded-2xl overflow-hidden ${
-          message.sender === 'user'
-            ? 'bg-gradient-to-br from-purple-600 to-blue-600 text-white'
-            : darkMode 
-              ? 'bg-gray-800/50 border border-gray-700/50' 
-              : 'bg-white/50 border border-gray-200/50'
-        } backdrop-blur-sm shadow-lg`}>
-          
-          {/* Message Header */}
-          <div className={`flex items-center justify-between p-4 ${
-            message.sender === 'user' ? 'border-b border-white/20' : 
-            darkMode ? 'border-b border-gray-700/30' : 'border-b border-gray-200/30'
-          }`}>
-            <div className="flex items-center space-x-3">
-              <span className={`font-semibold ${
-                message.sender === 'user' ? 'text-white' : 
-                darkMode ? 'text-white' : 'text-gray-900'
-              }`}>
-                {message.sender === 'user' ? 'You' : 'Neural Assistant'}
-              </span>
-              
-              {message.difficulty && (
-                <span className={`px-2 py-1 text-xs rounded-full ${
-                  message.difficulty === 'beginner' ? 'bg-green-500/20 text-green-400' :
-                  message.difficulty === 'intermediate' ? 'bg-yellow-500/20 text-yellow-400' :
-                  'bg-red-500/20 text-red-400'
-                }`}>
-                  {message.difficulty}
-                </span>
-              )}
-
-              {message.readTime && (
-                <div className="flex items-center space-x-1 text-xs opacity-70">
-                  <Clock size={12} />
-                  <span>{message.readTime} min read</span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button className={`p-1.5 rounded-lg hover:bg-black/10 ${
-                message.sender === 'user' ? 'text-white' : 
-                darkMode ? 'text-gray-400' : 'text-gray-600'
-              }`}>
-                <Bookmark size={14} />
-              </button>
-              <button className={`p-1.5 rounded-lg hover:bg-black/10 ${
-                message.sender === 'user' ? 'text-white' : 
-                darkMode ? 'text-gray-400' : 'text-gray-600'
-              }`}>
-                <Share2 size={14} />
-              </button>
-            </div>
-          </div>
-
-          {/* Message Body */}
-          <div className="p-6">
-            {message.sender === 'ai' ? (
-              <div className={`prose prose-lg max-w-none ${
-                darkMode ? 'prose-invert' : ''
-              }`}>
-                <ReactMarkdown>
-                  {message.content}
-                </ReactMarkdown>
-                
-                {/* Enhanced Visual Content */}
-                {message.imageUrl && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 0.5 }}
-                    className="mt-6 p-4 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl border border-blue-500/20"
-                  >
-                    <div className="flex items-center space-x-2 mb-3">
-                      <ImageIcon className="text-blue-400" size={18} />
-                      <span className={`font-medium ${darkMode ? 'text-blue-300' : 'text-blue-600'}`}>
-                        Visual Learning Aid
-                      </span>
-                    </div>
-                    <div className="relative group/image cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
-                      <Image 
-                        src={message.imageUrl || ''}
-                        alt={`Visual representation of ${message.topic || 'topic'}`}
-                        className="w-full rounded-lg shadow-lg transition-transform group-hover/image:scale-[1.02]"
-                        width={800}
-                        height={600}
-                        loading="lazy"
-                      />
-                      <div className="absolute inset-0 bg-black/0 group-hover/image:bg-black/10 rounded-lg transition-colors flex items-center justify-center">
-                        <div className="bg-black/50 text-white px-3 py-1 rounded-full text-sm opacity-0 group-hover/image:opacity-100 transition-opacity">
-                          Click to expand
-                        </div>
-                      </div>
-                    </div>
-                    <p className={`text-sm mt-2 text-center ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      🔍 Related to: {message.topic || 'Current Topic'}
-                    </p>
-                  </motion.div>
-                )}
-
-                {/* Achievements & Points */}
-                {(message.pointsEarned || message.achievements) && (
-                  <div className="mt-6 space-y-3">
-                    {message.pointsEarned && (
-                      <motion.div
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className="flex items-center justify-between p-4 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 rounded-lg border border-yellow-500/20"
-                      >
-                        <div className="flex items-center space-x-3">
-                          <div className="w-10 h-10 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full flex items-center justify-center">
-                            <Star size={20} className="text-white" />
-                          </div>
-                          <div>
-                            <p className={`font-semibold ${darkMode ? 'text-yellow-400' : 'text-yellow-600'}`}>
-                              +{message.pointsEarned} XP Earned!
-                            </p>
-                            <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                              Visual Learning Bonus Applied
-                            </p>
-                          </div>
-                        </div>
-                        <Zap className="text-yellow-500" size={20} />
-                      </motion.div>
-                    )}
-
-                    {message.achievements && message.achievements.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {message.achievements.map((achievement: string, idx: number) => (
-                          <motion.div
-                            key={idx}
-                            initial={{ opacity: 0, scale: 0.8 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ delay: idx * 0.1 }}
-                            className="flex items-center space-x-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-full"
-                          >
-                            <Trophy size={14} className="text-purple-400" />
-                            <span className={`text-sm font-medium ${darkMode ? 'text-purple-300' : 'text-purple-600'}`}>
-                              {achievement}
-                            </span>
-                          </motion.div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className={`text-lg leading-relaxed ${
-                message.sender === 'user' ? 'text-white' : 
-                darkMode ? 'text-gray-100' : 'text-gray-900'
-              }`}>
-                {message.content}
-              </p>
-            )}
-
-            {/* Tags */}
-            {message.tags && message.tags.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-4">
-                {message.tags.map((tag: string, idx: number) => (
-                  <span
-                    key={idx}
-                    className={`px-2 py-1 text-xs rounded-full ${
-                      message.sender === 'user' ? 'bg-white/20 text-white' :
-                      darkMode ? 'bg-gray-700/50 text-gray-300' : 'bg-gray-200/50 text-gray-700'
-                    }`}
-                  >
-                    #{tag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Message Footer */}
-          <div className={`flex items-center justify-between px-6 py-3 ${
-            message.sender === 'user' ? 'border-t border-white/20' :
-            darkMode ? 'border-t border-gray-700/30' : 'border-t border-gray-200/30'
-          }`}>
-            <div className="flex items-center space-x-3">
-              <span className={`text-xs ${
-                message.sender === 'user' ? 'text-white/70' : 
-                darkMode ? 'text-gray-400' : 'text-gray-600'
-              }`}>
-                {message.timestamp.toLocaleTimeString()}
-              </span>
-              
-              {message.sender === 'ai' && (
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => setReaction(reaction === 'like' ? null : 'like')}
-                    className={`p-1.5 rounded-lg transition-colors ${
-                      reaction === 'like' 
-                        ? 'bg-green-500/20 text-green-400' 
-                        : darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'
-                    }`}
-                  >
-                    <ThumbsUp size={14} />
-                  </button>
-                  <button className={`p-1.5 rounded-lg transition-colors ${
-                    darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-600'
-                  }`}>
-                    <RotateCcw size={14} />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center space-x-1 text-xs opacity-70">
-              <Eye size={12} />
-              <span>Read</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </motion.div>
+      <style jsx global>{`
+        .quick-action-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.7rem 0.9rem;
+          background-color: white;
+          border: 1px solid #e2e8f0;
+          border-radius: 0.75rem;
+          font-weight: 600;
+          font-size: 0.9rem;
+          color: #475569;
+          transition: all 0.2s;
+          box-shadow: 0 1px 0 0 rgba(15, 23, 42, 0.02);
+        }
+        .quick-action-btn:hover {
+          background-color: #f8fafc;
+          border-color: #cbd5e1;
+        }
+      `}</style>
+    </ToastProvider>
   );
-};
-
-// Helper Functions
-const getDifficultyFromInput = (input: string): 'beginner' | 'intermediate' | 'advanced' => {
-  if (input.includes('basic') || input.includes('simple') || input.includes('intro')) return 'beginner';
-  if (input.includes('advanced') || input.includes('complex') || input.includes('deep')) return 'advanced';
-  return 'intermediate';
-};
-
-const extractTagsFromInput = (input: string): string[] => {
-  const keywords = ['react', 'javascript', 'python', 'science', 'math', 'history', 'biology', 'physics'];
-  return keywords.filter(keyword => input.toLowerCase().includes(keyword));
-};
-
-const generateAdvancedAIResponse = (input: string): Message => {
-  const topics = ['science', 'programming', 'math', 'history', 'physics'];
-  const topic = topics.find(t => input.toLowerCase().includes(t)) || 'general';
-  const pointsEarned = Math.floor(Math.random() * 75) + 25;
-  const achievements = [];
-  
-  if (input.length > 50) achievements.push('Detail-Oriented Learner');
-  if (input.includes('diagram') || input.includes('visual')) achievements.push('Visual Thinker');
-  if (topic !== 'general') achievements.push(`${topic.charAt(0).toUpperCase() + topic.slice(1)} Explorer`);
-
-  const mockImageUrl = `https://source.unsplash.com/800x600/?${topic}&education&learning`;
-
-  return {
-    id: Date.now() + 1,
-    sender: 'ai',
-    content: generateAdvancedResponse(input, topic),
-    timestamp: new Date(),
-    topic: topic,
-    imageUrl: mockImageUrl,
-    pointsEarned: pointsEarned,
-    achievements: achievements,
-    difficulty: getDifficultyFromInput(input),
-    readTime: Math.ceil(Math.random() * 5) + 2,
-    tags: extractTagsFromInput(input),
-    reactions: [
-      { type: 'helpful', count: 12 },
-      { type: 'insightful', count: 8 }
-    ]
-  };
-};
-
-const generateAdvancedResponse = (input: string, topic: string): string => {
-  return `# 🎯 Advanced Learning Response
-
-## 🚀 Interactive Architecture Overview
-
-\`\`\`
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Your Query    │───▶│  Neural Processing│───▶│  Smart Response │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Context Analysis│    │  Knowledge Base │    │  Visual Elements│
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-\`\`\`
-
-## 💡 Comprehensive Analysis
-
-I've analyzed your question and generated a multi-layered response that includes:
-
-### 🔍 **Core Concepts**
-Your question touches on fundamental principles of **${topic}** that connect to broader learning frameworks. This topic is particularly interesting because it demonstrates the intersection of theoretical knowledge and practical application.
-
-### 🧠 **Deep Learning Insights**
-- **Conceptual Framework**: Understanding the underlying structure
-- **Visual Representation**: Diagrams and charts for better comprehension  
-- **Real-world Applications**: How this applies in professional contexts
-- **Advanced Connections**: Links to related topics and future learning paths
-
-### 🎮 **Interactive Learning Elements**
-- **Knowledge Check**: Quick assessment questions
-- **Practice Scenarios**: Real-world application exercises
-- **Visual Aids**: Custom diagrams and infographics
-- **Progressive Difficulty**: Adaptive content based on your level
-
-### 🚀 **Next Steps & Recommendations**
-1. **Explore Related Topics**: Dive deeper into connected concepts
-2. **Practice Applications**: Try hands-on exercises
-3. **Build Projects**: Apply knowledge in real scenarios
-4. **Join Communities**: Connect with other learners
-
-### 🏆 **Achievement Unlocked!**
-Congratulations! You've demonstrated excellent learning curiosity. This type of question shows you're thinking critically about complex topics.
-
----
-*💫 Enhanced with AI-powered insights, visual learning aids, and personalized recommendations*`;
 }
