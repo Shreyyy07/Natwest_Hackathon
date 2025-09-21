@@ -46,11 +46,11 @@ print("✅ Flask app and CORS initialized successfully!")
 from dotenv import load_dotenv
 load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
-github_token = os.getenv("GITHUB_TOKEN")
+leaderboard_db = LeaderboardDatabase()
 
-pipeline = KPipeline(lang_code='a')
+Base = declarative_base()
 
+<<<<<<< Updated upstream
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -186,6 +186,130 @@ def create_sample_data():
     finally:
         session.close()
 
+=======
+class LeaderboardEntry(Base):
+    __tablename__ = 'leaderboard_v2'  # Changed table name to avoid conflicts
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(100), unique=True, nullable=False)
+    user_name = Column(String(100), nullable=False)
+    user_email = Column(String(100), nullable=True)
+    points = Column(Integer, default=0)
+    level = Column(Integer, default=1)
+    streak = Column(Integer, default=0)
+    total_quizzes = Column(Integer, default=0)
+    correct_answers = Column(Integer, default=0)
+    badges = Column(String(1000), default='[]')  # Store as JSON string
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_active = Column(DateTime, default=datetime.utcnow)
+    weekly_points = Column(Integer, default=0)
+    monthly_points = Column(Integer, default=0)
+    previous_rank = Column(Integer, default=0)
+
+# 5. CREATE DATABASE ENGINE (lines 101-120)
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'leaderboard_v2.db')
+engine = create_engine(f'sqlite:///{DATABASE_PATH}')
+
+# ✅ Then use engine to create tables
+try:
+    Base.metadata.drop_all(engine)  # Remove old conflicting tables
+    Base.metadata.create_all(engine)  # Create new tables with correct schema
+    print("✅ Database schema updated successfully!")
+except Exception as e:
+    print(f"❌ Database creation error: {str(e)}")
+
+# ✅ Create session factory
+Session = sessionmaker(bind=engine)
+
+def create_sample_data():
+    """Create sample data if database is empty"""
+    session = Session()
+    
+    try:
+        # Check if data exists
+        if session.query(LeaderboardEntry).count() == 0:
+            print("📊 Creating sample leaderboard data...")
+            
+            sample_users = [
+                {
+                    'user_id': 'sample_user_1',
+                    'user_name': 'Alex Johnson',
+                    'points': 2450,
+                    'level': 24,
+                    'streak': 15,
+                    'total_quizzes': 45,
+                    'correct_answers': 38,
+                    'weekly_points': 450,
+                    'monthly_points': 1200,
+                    'badges': '["Quiz Master", "Streak Legend"]'
+                },
+                {
+                    'user_id': 'sample_user_2', 
+                    'user_name': 'Sarah Chen',
+                    'points': 2120,
+                    'level': 21,
+                    'streak': 8,
+                    'total_quizzes': 38,
+                    'correct_answers': 32,
+                    'weekly_points': 320,
+                    'monthly_points': 980,
+                    'badges': '["Knowledge Seeker"]'
+                },
+                {
+                    'user_id': 'sample_user_3',
+                    'user_name': 'Mike Rodriguez',
+                    'points': 1890,
+                    'level': 18,
+                    'streak': 22,
+                    'total_quizzes': 41,
+                    'correct_answers': 35,
+                    'weekly_points': 280,
+                    'monthly_points': 850,
+                    'badges': '["Streak Legend", "Quiz Master"]'
+                },
+                {
+                    'user_id': 'sample_user_4',
+                    'user_name': 'Emma Wilson',
+                    'points': 1650,
+                    'level': 16,
+                    'streak': 12,
+                    'total_quizzes': 33,
+                    'correct_answers': 28,
+                    'weekly_points': 220,
+                    'monthly_points': 720,
+                    'badges': '["Knowledge Seeker"]'
+                },
+                {
+                    'user_id': 'sample_user_5',
+                    'user_name': 'David Kim',
+                    'points': 1420,
+                    'level': 14,
+                    'streak': 6,
+                    'total_quizzes': 29,
+                    'correct_answers': 24,
+                    'weekly_points': 180,
+                    'monthly_points': 600,
+                    'badges': '["Quiz Master"]'
+                }
+            ]
+            
+            for user_data in sample_users:
+                user_entry = LeaderboardEntry(**user_data)
+                session.add(user_entry)
+            
+            session.commit()
+            print("✅ Sample leaderboard data created!")
+        else:
+            print("📊 Leaderboard data already exists")
+    
+    except Exception as e:
+        print(f"❌ Error creating sample data: {str(e)}")
+        session.rollback()
+    finally:
+        session.close()
+
+>>>>>>> Stashed changes
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
