@@ -50,11 +50,12 @@ leaderboard_db = LeaderboardDatabase()
 
 Base = declarative_base()
 
-<<<<<<< Updated upstream
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "http://localhost:3001"], "methods": ["GET", "POST"], "allow_headers": ["Content-Type"]}})
+
+github_token = os.getenv("GITHUB_TOKEN")
 
 client = OpenAI(
     base_url="https://models.github.ai/inference",
@@ -185,10 +186,6 @@ def create_sample_data():
         session.rollback()
     finally:
         session.close()
-
-=======
-class LeaderboardEntry(Base):
-    __tablename__ = 'leaderboard_v2'  # Changed table name to avoid conflicts
     
     id = Column(Integer, primary_key=True)
     user_id = Column(String(100), unique=True, nullable=False)
@@ -309,7 +306,6 @@ def create_sample_data():
     finally:
         session.close()
 
->>>>>>> Stashed changes
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -1358,10 +1354,7 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"❌ Database initialization error: {str(e)}")
 
-<<<<<<< Updated upstream
     print("🚀 Starting Tayyari.ai backend with leaderboard support on http://localhost:5000...")
     app.run(debug=True, host='0.0.0.0', port=5000)
-=======
-    print("🚀 Starting Tayyari.ai backend with leaderboard support...")
-    app.run(debug=True, host='0.0.0.0', port=5000)
->>>>>>> Stashed changes
+
+
