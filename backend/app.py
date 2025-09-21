@@ -1234,5 +1234,10 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"❌ Database initialization error: {str(e)}")
 
+<<<<<<< Updated upstream
     print("🚀 Starting Tayyari.ai backend with leaderboard support on http://localhost:5000...")
     app.run(debug=True, host='0.0.0.0', port=5000)
+=======
+    print("🚀 Starting Tayyari.ai backend with leaderboard support...")
+    app.run(debug=True, host='0.0.0.0', port=5000)
+>>>>>>> Stashed changes
