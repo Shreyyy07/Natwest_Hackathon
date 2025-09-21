@@ -98,13 +98,13 @@ const Navbar = () => {
                 </Button>
               </SignInButton>
               <Button asChild className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
-                <Link href="/chat">Get Started</Link>
+                <Link href="/learn/chat">Get Started</Link>
               </Button>
             </SignedOut>
             
             <SignedIn>
               <Button asChild className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
-                <Link href="/chat">Continue Learning</Link>
+                <Link href="/learn/chat">Continue Learning</Link>
               </Button>
               <UserButton afterSignOutUrl="/" />
             </SignedIn>
@@ -615,7 +615,7 @@ export default function HomePage() {
                     size="lg" 
                     className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white border-0 px-6 md:px-8 py-4 md:py-6 text-base md:text-lg font-semibold w-full sm:w-auto"
                   >
-                    <Link href="/chat" className="flex items-center gap-2 justify-center">
+                    <Link href="/learn/chat" className="flex items-center gap-2 justify-center">
                       <Zap className="w-5 h-5" />
                       Begin Your Journey
                     </Link>
@@ -630,7 +630,7 @@ export default function HomePage() {
                     size="lg" 
                     className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white border-0 px-6 md:px-8 py-4 md:py-6 text-base md:text-lg font-semibold w-full sm:w-auto"
                   >
-                    <Link href="/chat" className="flex items-center gap-2 justify-center">
+                    <Link href="/learn/chat" className="flex items-center gap-2 justify-center">
                       <Rocket className="w-5 h-5" />
                       Continue Learning
                     </Link>

@@ -235,7 +235,7 @@ export default function PDFUploader() {
             onClick={() => {
               // Navigate to chat with uploaded files
               const fileNames = files.map(f => f.name).join(', ');
-              window.location.href = `/chat?prompt=Analyze these uploaded PDFs: ${fileNames}`;
+              window.location.href = `/learn/chat?prompt=Analyze these uploaded PDFs: ${fileNames}`;
             }}
             className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-all hover:scale-105"
           >

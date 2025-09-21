@@ -39,7 +39,7 @@ export default function RocketLaunchButton() {
       
       // Navigate after epic animation
       setTimeout(() => {
-        router.push('/chat')
+        router.push('/learn/chat')
         setIsLaunching(false);
       }, 2500);
     }
