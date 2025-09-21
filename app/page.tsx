@@ -1,297 +1,657 @@
-'use client';
+'use client'
+import Link from 'next/link'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import RiveHero from '@/app/components/RiveHero'
+import { motion, useScroll, useTransform, useInView, AnimatePresence } from 'framer-motion'
+import { useRef, useState, useEffect } from 'react'
+import { SignInButton, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
+import { 
+  BookOpen, 
+  Brain, 
+  Target, 
+  Upload, 
+  Cpu, 
+  Gamepad2, 
+  Trophy, 
+  Star, 
+  Zap, 
+  Award,
+  TrendingUp,
+  Users,
+  Clock,
+  CheckCircle,
+  ChevronDown,
+  Sparkles,
+  Rocket,
+  Crown,
+  Medal,
+  Flame,
+  Menu,
+  X
+} from 'lucide-react'
 
-import { useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { motion } from "framer-motion";
-import Link from "next/link";
-import Navbar from "@/components/custom/navbar";
-import RiveHero from "@/app/components/RiveHero"; // ← Fixed import path
-
-const fadeInUp = {
-  initial: { opacity: 0, y: 15 },
-  animate: { opacity: 1, y: 0 },
-  transition: { 
-    duration: 0.7,
-    ease: [0.22, 1, 0.36, 1]
-  }
-};
-
-const staggerContainer = {
-  animate: { 
-    transition: { 
-      staggerChildren: 0.3,
-      delayChildren: 0.2,
-      ease: [0.22, 1, 0.36, 1]
-    } 
-  }
-};
-
-const scaleIn = {
-  initial: { opacity: 0, scale: 0.98 },
-  animate: { 
-    opacity: 1, 
-    scale: 1,
-    transition: {
-      duration: 0.8,
-      ease: [0.22, 1, 0.36, 1]
-    }
-  }
-};
-
-export default function Home() {
+// Custom Badge Component
+const Badge = ({ children, variant = "default", className = "" }) => {
+  const variants = {
+    default: "bg-blue-600 text-white",
+    secondary: "bg-purple-600 text-white",
+    outline: "border-2 border-purple-400 text-purple-400 bg-transparent",
+    destructive: "bg-red-600 text-white"
+  };
   
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
-      {/* Navbar */}
-      <Navbar loggedIn={false} />
+    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${variants[variant]} ${className}`}>
+      {children}
+    </span>
+  );
+};
 
-      {/* Interactive Rive Hero Section - REPLACES the old hero */}
-      <section className="relative w-full overflow-hidden">
-  <RiveHero />
-</section>
-
-      {/* Features grid */}
-      <section className="container mx-auto px-8 md:px-12 lg:px-16 py-24 my-12">
-  <motion.div
-    className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
-    initial="initial"
-    whileInView="animate"
-    viewport={{ once: true, margin: "-100px" }}
-    variants={staggerContainer}
-  >
-    {/* Professional Card 1 */}
-    <motion.div
-      className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-slate-800/90 backdrop-blur-sm border border-slate-700/50 p-8 hover:border-purple-500/50 transition-all duration-500"
-      variants={scaleIn}
-    >
-      {/* Background Glow */}
-      <div className="absolute inset-0 bg-gradient-to-br from-purple-600/10 to-blue-600/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-      
-      {/* Content */}
-      <div className="relative z-10">
-        <div className="mb-6 p-3 w-fit bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-xl border border-purple-500/30">
-          <svg className="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-          </svg>
-        </div>
-        
-        <h3 className="text-xl font-semibold text-white mb-3 group-hover:text-purple-300 transition-colors">
-          Drop Any Content
-        </h3>
-        
-        <p className="text-slate-400 text-base leading-relaxed mb-6">
-          Transform lectures, research papers, and notes into interactive learning experiences with our AI-powered platform.
-        </p>
-        
-        {/* Action Buttons */}
-        <div className="flex gap-3">
-          <button className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors">
-            Try Now
-          </button>
-          <button className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium rounded-lg transition-colors">
-            Learn More
-          </button>
-        </div>
-      </div>
-    </motion.div>
-
-    {/* Professional Card 2 */}
-    <motion.div
-      className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-slate-800/90 backdrop-blur-sm border border-slate-700/50 p-8 hover:border-blue-500/50 transition-all duration-500"
-      variants={scaleIn}
-    >
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 to-cyan-600/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-      
-      <div className="relative z-10">
-        <div className="mb-6 p-3 w-fit bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-xl border border-blue-500/30">
-          <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-        </div>
-        
-        <h3 className="text-xl font-semibold text-white mb-3 group-hover:text-blue-300 transition-colors">
-          Learn Your Way
-        </h3>
-        
-        <p className="text-slate-400 text-base leading-relaxed mb-6">
-          AI adapts to your learning style, creating personalized paths that match how your brain processes information best.
-        </p>
-        
-        <div className="flex gap-3">
-          <button className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-            Explore
-          </button>
-          <button className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium rounded-lg transition-colors">
-            Details
-          </button>
-        </div>
-      </div>
-    </motion.div>
-
-    {/* Professional Card 3 */}
-    <motion.div
-      className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900/90 to-slate-800/90 backdrop-blur-sm border border-slate-700/50 p-8 hover:border-emerald-500/50 transition-all duration-500"
-      variants={scaleIn}
-    >
-      <div className="absolute inset-0 bg-gradient-to-br from-emerald-600/10 to-teal-600/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-      
-      <div className="relative z-10">
-        <div className="mb-6 p-3 w-fit bg-gradient-to-br from-emerald-500/20 to-teal-500/20 rounded-xl border border-emerald-500/30">
-          <svg className="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-        </div>
-        
-        <h3 className="text-xl font-semibold text-white mb-3 group-hover:text-emerald-300 transition-colors">
-          Make It Stick
-        </h3>
-        
-        <p className="text-slate-400 text-base leading-relaxed mb-6">
-          Reinforce learning with AI-generated quizzes, flashcards, and visual maps designed for long-term retention.
-        </p>
-        
-        <div className="flex gap-3">
-          <button className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors">
-            Start Quiz
-          </button>
-          <button className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium rounded-lg transition-colors">
-            View More
-          </button>
-        </div>
-      </div>
-    </motion.div>
-  </motion.div>
-</section>
-
-      {/* User journey breakdown */}
-<section className="container mx-auto px-4 py-24">
-  <motion.div
-    className="max-w-4xl mx-auto"
-    initial="initial"
-    whileInView="animate"
-    viewport={{ once: true, margin: "-100px" }}
-    variants={staggerContainer}
-  >
-    {/* Section Header */}
-    <div className="text-center mb-16">
-      <motion.h2 
-        className="text-3xl md:text-4xl font-bold text-white mb-4"
-        variants={fadeInUp}
-      >
-        How It Works
-      </motion.h2>
-      <motion.p 
-        className="text-slate-400 text-lg max-w-2xl mx-auto"
-        variants={fadeInUp}
-      >
-        Three simple steps to transform your learning experience with AI
-      </motion.p>
+// Custom Progress Component
+const Progress = ({ value, className = "" }) => {
+  return (
+    <div className={`w-full bg-gray-700 rounded-full h-2 ${className}`}>
+      <motion.div 
+        className="h-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"
+        initial={{ width: 0 }}
+        animate={{ width: `${value}%` }}
+        transition={{ duration: 1, ease: "easeOut" }}
+      />
     </div>
+  );
+};
 
-    {/* Steps */}
-    <div className="space-y-12">
-      {/* Step 1 */}
-      <motion.div 
-        className="flex items-start gap-6 p-6 rounded-2xl bg-gradient-to-r from-slate-900/50 to-slate-800/50 border border-slate-700/50 backdrop-blur-sm"
-        variants={fadeInUp}
-      >
-        <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
-          1
-        </div>
-        <div className="flex-1">
-          <h3 className="text-xl font-semibold text-white mb-2">Upload Your Content</h3>
-          <p className="text-slate-400 leading-relaxed">
-            Simply drag and drop your learning materials—PDFs, slides, notes, or videos. Our AI instantly processes and understands your content structure.
-          </p>
-        </div>
-      </motion.div>
+// Navbar Component - Removed Dashboard and Pricing
+const Navbar = () => {
+  const [isOpen, setIsOpen] = useState(false);
 
-      {/* Step 2 */}
-      <motion.div 
-        className="flex items-start gap-6 p-6 rounded-2xl bg-gradient-to-r from-slate-900/50 to-slate-800/50 border border-slate-700/50 backdrop-blur-sm"
-        variants={fadeInUp}
-      >
-        <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
-          2
-        </div>
-        <div className="flex-1">
-          <h3 className="text-xl font-semibold text-white mb-2">AI Processing</h3>
-          <p className="text-slate-400 leading-relaxed">
-            Advanced AI algorithms analyze your content, extract key concepts, and create personalized learning paths tailored to your cognitive style.
-          </p>
-        </div>
-      </motion.div>
-
-      {/* Step 3 */}
-      <motion.div 
-        className="flex items-start gap-6 p-6 rounded-2xl bg-gradient-to-r from-slate-900/50 to-slate-800/50 border border-slate-700/50 backdrop-blur-sm"
-        variants={fadeInUp}
-      >
-        <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
-          3
-        </div>
-        <div className="flex-1">
-          <h3 className="text-xl font-semibold text-white mb-2">Interactive Learning</h3>
-          <p className="text-slate-400 leading-relaxed">
-            Engage with dynamic quizzes, interactive summaries, and adaptive content that evolves based on your progress and understanding.
-          </p>
-        </div>
-      </motion.div>
-    </div>
-  </motion.div>
-</section>
-
-      {/* CTA */}
-      <section className="container mx-auto px-4 py-32">
-        <motion.div
-          className="relative p-16 rounded-[2.5rem] bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-xl border border-gray-700/50 shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:shadow-[0_25px_80px_rgba(0,0,0,0.5)] transition-all duration-700 group"
-          initial={{ opacity: 0, scale: 0.98 }}
-          whileInView={{ opacity: 1, scale: 1 }}
-          viewport={{ once: true, margin: "-100px" }}
-          transition={{
-            duration: 0.8,
-            ease: [0.22, 1, 0.36, 1]
-          }}
-        >
-          {/* Optional rotating gradient behind */}
-          <div className="absolute -inset-1 bg-gradient-to-r from-purple-500 via-blue-500 to-purple-500 opacity-20 rounded-[2.5rem] blur-xl animate-pulse z-0 pointer-events-none"></div>
-
-          <div className="relative z-10 text-center">
-            <motion.h2
-              className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-blue-400 to-purple-500 drop-shadow-md"
-              initial={{ opacity: 0, y: 15 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{
-                delay: 0.2,
-                duration: 0.7,
-                ease: [0.22, 1, 0.36, 1]
-              }}
-            >
-              Ready to learn differently?
-            </motion.h2>
-
+  return (
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-slate-900/95 backdrop-blur-md border-b border-slate-800">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center h-16">
+          {/* Logo */}
+          <Link href="/" className="flex items-center space-x-2">
             <motion.div
-              initial={{ opacity: 0, y: 15 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{
-                delay: 0.4,
-                duration: 0.7,
-                ease: [0.22, 1, 0.36, 1]
-              }}
-              className="mt-10"
+              whileHover={{ rotate: 360 }}
+              transition={{ duration: 0.5 }}
+              className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center"
             >
-              <Link href="/learn">
-                <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-12 py-6 text-xl rounded-2xl font-semibold transition-all duration-300 shadow-md">
-                  Get Started
-                </Button>
-              </Link>
+              <Sparkles className="w-5 h-5 text-white" />
             </motion.div>
+            <span className="text-xl font-bold text-white">Tayyari</span>
+          </Link>
+
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex items-center space-x-8">
+            <Link href="#features" className="text-gray-300 hover:text-white transition-colors">
+              Features
+            </Link>
+            <Link href="#how-it-works" className="text-gray-300 hover:text-white transition-colors">
+              How it Works
+            </Link>
+            
+            {/* Clerk Authentication - Removed Dashboard buttons */}
+            <SignedOut>
+              <SignInButton mode="modal">
+                <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800">
+                  Sign In
+                </Button>
+              </SignInButton>
+              <Button asChild className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+                <Link href="/chat">Get Started</Link>
+              </Button>
+            </SignedOut>
+            
+            <SignedIn>
+              <Button asChild className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+                <Link href="/chat">Continue Learning</Link>
+              </Button>
+              <UserButton afterSignOutUrl="/" />
+            </SignedIn>
+          </div>
+
+          {/* Mobile menu button */}
+          <div className="md:hidden">
+            <button
+              onClick={() => setIsOpen(!isOpen)}
+              className="text-gray-400 hover:text-white focus:outline-none focus:text-white"
+            >
+              {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Navigation - Removed Pricing */}
+        <AnimatePresence>
+          {isOpen && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="md:hidden"
+            >
+              <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 bg-slate-800/50 rounded-lg mt-2">
+                <Link href="#features" className="block px-3 py-2 text-gray-300 hover:text-white">
+                  Features
+                </Link>
+                <Link href="#how-it-works" className="block px-3 py-2 text-gray-300 hover:text-white">
+                  How it Works
+                </Link>
+                <div className="flex flex-col space-y-2 px-3 pt-2">
+                  <SignedOut>
+                    <SignInButton mode="modal">
+                      <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800 w-full">
+                        Sign In
+                      </Button>
+                    </SignInButton>
+                    <Button asChild className="bg-gradient-to-r from-blue-600 to-purple-600 w-full">
+                      <Link href="/get-started">Get Started</Link>
+                    </Button>
+                  </SignedOut>
+                  
+                  <SignedIn>
+                    <div className="flex justify-center pt-2">
+                      <UserButton afterSignOutUrl="/" />
+                    </div>
+                  </SignedIn>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </nav>
+  );
+};
+
+// Animated Feature Card Component
+const AnimatedFeatureCard = ({ icon: Icon, title, description, color, delay = 0, index, actionButtons }) => {
+  const cardRef = useRef(null);
+  const isInView = useInView(cardRef, { once: true, margin: "-100px" });
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <motion.div
+      ref={cardRef}
+      initial={{ opacity: 0, y: 50, rotateX: -10 }}
+      animate={isInView ? { opacity: 1, y: 0, rotateX: 0 } : { opacity: 0, y: 50, rotateX: -10 }}
+      transition={{ duration: 0.6, delay, type: "spring", stiffness: 100 }}
+      whileHover={{ 
+        scale: 1.02, 
+        rotateY: 5,
+        boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)"
+      }}
+      onHoverStart={() => setIsHovered(true)}
+      onHoverEnd={() => setIsHovered(false)}
+      className="group"
+    >
+      <Card className="relative h-full bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-slate-700 backdrop-blur-sm overflow-hidden">
+        {/* Animated background glow */}
+        <motion.div 
+          className={`absolute inset-0 bg-gradient-to-br ${color} opacity-0 group-hover:opacity-10 transition-opacity duration-300`}
+          animate={isHovered ? { scale: 1.1 } : { scale: 1 }}
+        />
+        
+        {/* Floating particles */}
+        <AnimatePresence>
+          {isHovered && (
+            <motion.div className="absolute inset-0 pointer-events-none">
+              {[...Array(5)].map((_, i) => (
+                <motion.div
+                  key={i}
+                  className="absolute w-2 h-2 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full"
+                  initial={{ 
+                    opacity: 0, 
+                    x: Math.random() * 300, 
+                    y: Math.random() * 300,
+                    scale: 0 
+                  }}
+                  animate={{ 
+                    opacity: [0, 1, 0], 
+                    y: Math.random() * 300 - 50,
+                    scale: [0, 1, 0],
+                    rotate: 360
+                  }}
+                  exit={{ opacity: 0 }}
+                  transition={{ 
+                    duration: 2, 
+                    delay: i * 0.2,
+                    repeat: Infinity 
+                  }}
+                />
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <CardHeader className="relative">
+          <motion.div 
+            className={`w-16 h-16 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center mb-4 mx-auto`}
+            animate={isHovered ? { rotate: [0, -10, 10, 0] } : { rotate: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <Icon className="w-8 h-8 text-white" />
+          </motion.div>
+          
+          <CardTitle className="text-xl text-center text-white group-hover:text-transparent group-hover:bg-gradient-to-r group-hover:from-blue-400 group-hover:to-purple-400 group-hover:bg-clip-text transition-all duration-300">
+            {title}
+          </CardTitle>
+        </CardHeader>
+        
+        <CardContent className="relative">
+          <CardDescription className="text-center text-gray-300 leading-relaxed mb-6">
+            {description}
+          </CardDescription>
+        </CardContent>
+
+        <CardFooter className="relative flex flex-col gap-4">
+          {/* Action Buttons */}
+          <div className="flex gap-2 w-full">
+            {actionButtons}
+          </div>
+          
+          {/* Progress Bar */}
+          <motion.div 
+            className="w-full"
+            initial={{ width: 0 }}
+            animate={isInView ? { width: "100%" } : { width: 0 }}
+            transition={{ duration: 1, delay: delay + 0.5 }}
+          >
+            <Progress value={85 + index * 5} className="h-2" />
+            <div className="flex justify-between mt-2 text-xs text-gray-400">
+              <span>Engagement</span>
+              <span>{85 + index * 5}%</span>
+            </div>
+          </motion.div>
+        </CardFooter>
+      </Card>
+    </motion.div>
+  );
+};
+
+// Achievement Badge Component
+const AchievementBadge = ({ icon: Icon, title, earned = false, delay = 0 }) => {
+  return (
+    <motion.div
+      initial={{ scale: 0, rotate: -180 }}
+      animate={{ scale: 1, rotate: 0 }}
+      transition={{ 
+        delay, 
+        type: "spring", 
+        stiffness: 200,
+        damping: 15 
+      }}
+      whileHover={{ 
+        scale: 1.1, 
+        rotate: 5,
+        boxShadow: "0 10px 25px rgba(0,0,0,0.3)" 
+      }}
+      className={`relative p-4 rounded-full ${earned ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-slate-700'} transition-all duration-300`}
+    >
+      <Icon className={`w-6 h-6 ${earned ? 'text-white' : 'text-gray-400'}`} />
+      {earned && (
+        <motion.div
+          className="absolute -top-1 -right-1"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+        >
+          <Sparkles className="w-4 h-4 text-yellow-300" />
+        </motion.div>
+      )}
+      <div className="text-xs text-center mt-2 text-white">{title}</div>
+    </motion.div>
+  );
+};
+
+// Main Component
+export default function HomePage() {
+  const { scrollYProgress } = useScroll()
+  const y = useTransform(scrollYProgress, [0, 1], ['0%', '50%'])
+  const opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0])
+  
+  const featuresRef = useRef(null)
+  const processRef = useRef(null)
+  
+  const featuresInView = useInView(featuresRef, { once: true, margin: "-100px" })
+  const processInView = useInView(processRef, { once: true, margin: "-100px" })
+
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      setMousePosition({ x: e.clientX, y: e.clientY });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  const features = [
+    {
+      icon: BookOpen,
+      title: "Drop Any Content",
+      description: "Transform lectures, research papers, and notes into interactive learning experiences with our AI-powered platform.",
+      color: "from-blue-500 to-cyan-500",
+      actionButtons: (
+        <div className="flex gap-2 w-full">
+          <Button size="sm" className="flex-1 bg-blue-600 hover:bg-blue-700">
+            Try Now
+          </Button>
+          <Button size="sm" variant="outline" className="flex-1 border-gray-600 text-black hover:bg-gray-700">
+            Learn More
+          </Button>
+        </div>
+      )
+    },
+    {
+      icon: Brain,
+      title: "Learn Your Way", 
+      description: "AI adapts to your learning style, creating personalized paths that match how your brain processes information best.",
+      color: "from-purple-500 to-pink-500",
+      actionButtons: (
+        <div className="flex gap-2 w-full">
+          <Button size="sm" className="flex-1 bg-blue-600 hover:bg-blue-700">
+            Explore
+          </Button>
+          <Button size="sm" variant="outline" className="flex-1 border-gray-600 text-black hover:bg-gray-700">
+            Details
+          </Button>
+        </div>
+      )
+    },
+    {
+      icon: Target,
+      title: "Make It Stick",
+      description: "Reinforce learning with AI-generated quizzes, flashcards, and visual maps designed for long-term retention.",
+      color: "from-green-500 to-teal-500",
+      actionButtons: (
+        <div className="flex gap-2 w-full">
+          <Button size="sm" className="flex-1 bg-green-600 hover:bg-green-700">
+            Start Quiz
+          </Button>
+          <Button size="sm" variant="outline" className="flex-1 border-gray-600 text-black hover:bg-gray-700">
+            View More
+          </Button>
+        </div>
+      )
+    }
+  ]
+
+  const processSteps = [
+    {
+      icon: Upload,
+      title: "Upload Your Content",
+      description: "Simply drag and drop your learning materials—PDFs, slides, notes, or videos. Our AI instantly processes and understands your content structure.",
+      color: "from-blue-500 to-purple-500"
+    },
+    {
+      icon: Cpu,
+      title: "AI Processing", 
+      description: "Advanced AI algorithms analyze your content, extract key concepts, and create personalized learning paths tailored to your cognitive style.",
+      color: "from-purple-500 to-pink-500"
+    },
+    {
+      icon: Gamepad2,
+      title: "Interactive Learning",
+      description: "Engage with dynamic quizzes, interactive summaries, and adaptive content that evolves based on your progress and understanding.",
+      color: "from-pink-500 to-red-500"
+    }
+  ]
+
+  const achievements = [
+    { icon: Medal, title: "First Steps", earned: true },
+    { icon: Flame, title: "Hot Streak", earned: true },
+    { icon: Trophy, title: "Quiz Master", earned: true },
+    { icon: Star, title: "Knowledge Seeker", earned: false },
+    { icon: Crown, title: "Learning Legend", earned: false },
+  ];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+      {/* Navbar */}
+      <Navbar />
+
+      {/* Animated Background Elements */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        {[...Array(15)].map((_, i) => (
+          <motion.div
+            key={i}
+            className="absolute w-2 h-2 bg-gradient-to-r from-blue-400/10 to-purple-400/10 rounded-full"
+            animate={{
+              x: [Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 1920), Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 1920)],
+              y: [Math.random() * (typeof window !== 'undefined' ? window.innerHeight : 1080), Math.random() * (typeof window !== 'undefined' ? window.innerHeight : 1080)],
+              scale: [0, 1, 0],
+              opacity: [0, 0.4, 0]
+            }}
+            transition={{
+              duration: Math.random() * 10 + 10,
+              repeat: Infinity,
+              delay: Math.random() * 5
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Mouse follower effect */}
+      <motion.div
+        className="fixed w-96 h-96 rounded-full bg-gradient-to-r from-blue-500/3 to-purple-500/3 pointer-events-none z-0 blur-3xl"
+        animate={{
+          x: mousePosition.x - 192,
+          y: mousePosition.y - 192,
+        }}
+        transition={{ type: "spring", stiffness: 50, damping: 15 }}
+      />
+
+      {/* Hero Section - Fully Responsive */}
+      <section className="relative w-full min-h-screen flex items-center justify-center overflow-hidden">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.8 }}
+          className="w-full h-full min-h-screen flex items-center justify-center"
+          style={{ y, opacity }}
+        >
+          {/* Responsive RiveHero Container */}
+          <div className="w-full h-full min-h-screen max-w-none mx-auto relative">
+            {/* Overlay container to ensure proper sizing */}
+            <div className="absolute inset-0 w-full h-full">
+              <RiveHero />
+            </div>
           </div>
         </motion.div>
       </section>
 
-    </main>
+      {/* Features Section */}
+      <motion.section 
+        ref={featuresRef}
+        className="relative px-4 py-16 md:py-20"
+        initial={{ opacity: 0 }}
+        animate={featuresInView ? { opacity: 1 } : { opacity: 0 }}
+        transition={{ duration: 0.8 }}
+        id="features"
+      >
+        <div className="max-w-7xl mx-auto">
+          <motion.div 
+            className="text-center mb-12 md:mb-16"
+            initial={{ opacity: 0, y: 30 }}
+            animate={featuresInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 30 }}
+            transition={{ duration: 0.8 }}
+          >
+            <h2 className="text-2xl md:text-4xl lg:text-5xl font-bold mb-4 md:mb-6 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+              Choose Your Learning Adventure
+            </h2>
+            <p className="text-lg md:text-xl text-gray-300 max-w-3xl mx-auto">
+              Three powerful paths to transform how you learn, retain, and master any subject
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
+            {features.map((feature, index) => (
+              <AnimatedFeatureCard
+                key={feature.title}
+                icon={feature.icon}
+                title={feature.title}
+                description={feature.description}
+                color={feature.color}
+                delay={index * 0.2}
+                index={index}
+                actionButtons={feature.actionButtons}
+              />
+            ))}
+          </div>
+        </div>
+      </motion.section>
+
+      {/* Process Section */}
+      <motion.section 
+        ref={processRef}
+        className="relative px-4 py-16 md:py-20"
+        initial={{ opacity: 0 }}
+        animate={processInView ? { opacity: 1 } : { opacity: 0 }}
+        transition={{ duration: 0.8 }}
+        id="how-it-works"
+      >
+        <div className="max-w-7xl mx-auto">
+          <motion.div 
+            className="text-center mb-12 md:mb-16"
+            initial={{ opacity: 0, y: 30 }}
+            animate={processInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 30 }}
+            transition={{ duration: 0.8 }}
+          >
+            <h2 className="text-2xl md:text-4xl lg:text-5xl font-bold mb-4 md:mb-6 text-white">
+              Your Learning Journey
+            </h2>
+            <p className="text-lg md:text-xl text-gray-300 max-w-3xl mx-auto">
+              From upload to mastery in three gamified steps
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
+            {processSteps.map((step, index) => (
+              <motion.div
+                key={step.title}
+                initial={{ opacity: 0, x: -50 }}
+                animate={processInView ? { opacity: 1, x: 0 } : { opacity: 0, x: -50 }}
+                transition={{ duration: 0.6, delay: index * 0.2 }}
+                whileHover={{ scale: 1.03 }}
+                className="relative"
+              >
+                <Card className="h-full bg-gradient-to-br from-slate-800/50 to-slate-900/50 border-slate-700 backdrop-blur-sm hover:border-purple-500/50 transition-all duration-300">
+                  <CardHeader className="text-center">
+                    <motion.div 
+                      className={`w-16 md:w-20 h-16 md:h-20 rounded-full bg-gradient-to-br ${step.color} flex items-center justify-center mx-auto mb-4 relative`}
+                      whileHover={{ rotate: 360 }}
+                      transition={{ duration: 0.8 }}
+                    >
+                      <step.icon className="w-8 md:w-10 h-8 md:h-10 text-white" />
+                      
+                      {/* Step number badge */}
+                      <motion.div 
+                        className="absolute -top-2 -right-2 w-6 md:w-8 h-6 md:h-8 bg-yellow-400 text-black rounded-full flex items-center justify-center font-bold text-xs md:text-sm"
+                        initial={{ scale: 0 }}
+                        animate={processInView ? { scale: 1 } : { scale: 0 }}
+                        transition={{ delay: index * 0.2 + 0.5 }}
+                      >
+                        {index + 1}
+                      </motion.div>
+                    </motion.div>
+                    
+                    <CardTitle className="text-lg md:text-xl text-white">{step.title}</CardTitle>
+                  </CardHeader>
+                  
+                  <CardContent>
+                    <CardDescription className="text-gray-300 leading-relaxed text-sm md:text-base">
+                      {step.description}
+                    </CardDescription>
+                  </CardContent>
+                </Card>
+
+                {/* Connecting line - Hidden on mobile */}
+                {index < processSteps.length - 1 && (
+                  <motion.div 
+                    className="hidden md:block absolute top-1/2 left-full w-8 h-0.5 bg-gradient-to-r from-purple-500 to-transparent z-10"
+                    initial={{ scaleX: 0 }}
+                    animate={processInView ? { scaleX: 1 } : { scaleX: 0 }}
+                    transition={{ delay: index * 0.2 + 0.8, duration: 0.6 }}
+                  />
+                )}
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </motion.section>
+
+      {/* CTA Section - Removed Dashboard references */}
+      <motion.section 
+        className="relative px-4 py-16 md:py-20"
+        initial={{ opacity: 0, y: 50 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8 }}
+        viewport={{ once: true }}
+      >
+        <div className="max-w-4xl mx-auto text-center">
+          <motion.div
+            className="bg-gradient-to-r from-slate-800/50 via-slate-700/50 to-slate-800/50 rounded-2xl p-8 md:p-12 backdrop-blur-sm border border-slate-600/30"
+            whileHover={{ scale: 1.02 }}
+            transition={{ duration: 0.3 }}
+          >
+            <h2 className="text-2xl md:text-4xl lg:text-5xl font-bold mb-4 md:mb-6 text-white">
+              Ready to Level Up?
+            </h2>
+            <p className="text-lg md:text-xl text-gray-300 mb-6 md:mb-8 max-w-2xl mx-auto">
+              Join thousands of learners earning XP, unlocking achievements, and mastering new skills every day.
+            </p>
+            
+            <motion.div 
+              className="flex flex-col sm:flex-row gap-4 justify-center"
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+            >
+              <SignedOut>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button 
+                    asChild 
+                    size="lg" 
+                    className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white border-0 px-6 md:px-8 py-4 md:py-6 text-base md:text-lg font-semibold w-full sm:w-auto"
+                  >
+                    <Link href="/chat" className="flex items-center gap-2 justify-center">
+                      <Zap className="w-5 h-5" />
+                      Begin Your Journey
+                    </Link>
+                  </Button>
+                </motion.div>
+              </SignedOut>
+              
+              <SignedIn>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button 
+                    asChild 
+                    size="lg" 
+                    className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white border-0 px-6 md:px-8 py-4 md:py-6 text-base md:text-lg font-semibold w-full sm:w-auto"
+                  >
+                    <Link href="/chat" className="flex items-center gap-2 justify-center">
+                      <Rocket className="w-5 h-5" />
+                      Continue Learning
+                    </Link>
+                  </Button>
+                </motion.div>
+              </SignedIn>
+              
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button 
+                  variant="outline" 
+                  size="lg" 
+                  className="border-2 border-purple-400 text-purple-400 hover:bg-purple-400 hover:text-white px-6 md:px-8 py-4 md:py-6 text-base md:text-lg font-semibold w-full sm:w-auto"
+                >
+                  <Users className="w-5 h-5 mr-2" />
+                  Join Community
+                </Button>
+              </motion.div>
+            </motion.div>
+          </motion.div>
+        </div>
+      </motion.section>
+    </div>
   )
 }

@@ -1,6 +1,6 @@
 """
-MindFlow Agents Module
-This module contains the implementation of various AI agents used in MindFlow.
+Tayyari.ai Agents Module
+This module contains the implementation of various AI agents used in Tayyari.ai.
 """
 
 from .agent_service import AgentService

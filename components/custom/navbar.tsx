@@ -67,7 +67,7 @@ export default function Navbar({ loggedIn }: NavbarProps) {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-8">
             <Link
-              href="/learn"
+              href="/chat"
               className="flex items-center space-x-2 text-gray-300 hover:text-white transition-colors group"
             >
               <BookOpen size={16} className="group-hover:text-purple-400 transition-colors" />
@@ -153,7 +153,7 @@ export default function Navbar({ loggedIn }: NavbarProps) {
               {/* Mobile Navigation Links */}
               <div className="space-y-2">
                 <Link
-                  href="/learn"
+                  href="/chat"
                   onClick={() => setIsMobileMenuOpen(false)}
                   className="flex items-center space-x-3 text-gray-300 hover:text-white transition-colors p-3 rounded-lg hover:bg-gray-800/50"
                 >

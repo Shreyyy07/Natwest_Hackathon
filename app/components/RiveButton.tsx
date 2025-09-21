@@ -14,7 +14,7 @@ export default function RiveButton({ rive, className }: RiveButtonProps) {
   
   return (
     <div className={className}>
-      <Link href="/learn">
+      <Link href="/chat/page.tsx">
         <Button 
           className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 py-4 text-lg font-semibold rounded-xl shadow-lg hover:shadow-purple-500/25 transition-all hover:scale-105"
           onMouseEnter={() => hoverInput && (hoverInput.value = true)}
