@@ -21,4 +21,5 @@ export interface Message {
   achievements?: string[];
   pointsEarned?: number;
   topic?: string;
+  mermaidChart?: string;
 }
