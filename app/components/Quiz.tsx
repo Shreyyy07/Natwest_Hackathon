@@ -1,714 +1,147 @@
 'use client';
 
-import React, { useMemo, useState, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Check, RotateCcw, Sparkles, Copy, Loader2 } from 'lucide-react';
-import MermaidDiagram from './Mermaid';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Sparkles, RotateCw, CheckCircle2, XCircle } from 'lucide-react';
+import { usePoints } from './points/PointsProvider';
+import CoinBurst from './CoinBurst';
 
-type QuizOption = {
-  id: string;
-  text: string;
-  isCorrect: boolean;
-};
+const STOP = new Set(['the','a','an','and','or','but','if','then','else','for','while','to','of','in','on','at','by','with','from','as','is','are','was','were','be','been','being','it','this','that','these','those','there','here','i','you','he','she','we','they','them','his','her','our','your','my','mine','ours','yours','their','theirs','me']);
 
-type QuizQuestion = {
-  id: string;
-  prompt: string;        // sentence with blank
-  answer: string;        // correct word (nicely cased)
-  source: string;        // original cleaned sentence (complete)
-  options: QuizOption[];
-};
+type Question = { id: string; stem: string; options: string[]; correctIndex: number; selectedIndex?: number; };
+const POINTS_PER_CORRECT = 10;
 
-type RNG = () => number;
+function uuid() { return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2); }
+function tokenize(t: string){return (t||'').toLowerCase().replace(/```[\s\S]*?```/g,' ').replace(/`[^`]*`/g,' ').replace(/[^\p{L}\p{N}\s]/gu,' ').split(/\s+/).filter(Boolean);}
+function topKeywords(t: string, max=24){const m=new Map<string,number>();for(const w of tokenize(t)){if(STOP.has(w)||w.length<3)continue;m.set(w,(m.get(w)||0)+1);}return [...m.entries()].sort((a,b)=>b[1]-a[1]).map(([w])=>w).slice(0,max);}
+function splitSentences(t:string){return (t||'').replace(/\s+/g,' ').split(/(?<=[.!?])\s+(?=[A-Z0-9])/g).map(s=>s.trim()).filter(Boolean);}
+function shuffle<T>(a:T[]){const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]];}return x;}
+function escapeRegExp(s:string){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+function capitalize(w:string){return w.charAt(0).toUpperCase()+w.slice(1);}
 
-const uuid = () =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
-
-// Keep API usage aligned with page.tsx concept
-const API_URL =
-  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '')) ||
-  '/api/process-content';
-
-// ----------------------
-// Seeded RNG utilities (for variety on Regenerate)
-// ----------------------
-const hashSeed = (s: string) => {
-  let h = 1779033703 ^ s.length;
-  for (let i = 0; i < s.length; i++) {
-    h = Math.imul(h ^ s.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
+function buildQuestionsFromText(text: string, count=5):Question[]{
+  if(!text||text.trim().length<10) return fallbackQuestions();
+  const sentences=splitSentences(text); const keywords=topKeywords(text,40); if(keywords.length<4) return fallbackQuestions();
+  const qs:Question[]=[]; for(const kw of keywords){ if(qs.length>=count) break; const m=sentences.find(s=>new RegExp(`\\b${escapeRegExp(kw)}\\b`,'i').test(s)); if(!m) continue;
+    const stem=m.replace(new RegExp(`\\b${escapeRegExp(kw)}\\b`,'i'),'___'); const decoys=shuffle(keywords.filter(k=>k!==kw)).slice(0,3); if(decoys.length<3) continue;
+    const optionPool=shuffle([kw,...decoys]); qs.push({id:uuid(), stem: stem.endsWith('.')?stem:`${stem}.`, options: optionPool.map(capitalize), correctIndex: optionPool.findIndex(o=>o===kw) });
   }
-  h = Math.imul(h ^ (h >>> 16), 2246822507);
-  h ^= Math.imul(h ^ (h >>> 13), 3266489909);
-  return (h ^ (h >>> 16)) >>> 0;
-};
-
-const mulberry32 = (a: number): RNG => {
-  return function () {
-    let t = (a += 0x6D2B79F5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-};
-
-const createRng = (seed: string): RNG => mulberry32(hashSeed(seed));
-
-const shuffleRng = <T,>(arr: T[], rng: RNG): T[] => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
-
-// ----------------------
-// Text cleanup utilities for question generation
-// ----------------------
-const stripMarkdown = (input: string) => {
-  let text = input ?? '';
-  text = text.replace(/```[\s\S]*?```/g, ' ');
-  text = text.replace(/`[^`]*`/g, ' ');
-  text = text.replace(/!\[[^\]]*]\([^)]*\)/g, ' ');
-  text = text.replace(/\[([^\]]+)]\(([^)]+)\)/g, '$1');
-  text = text.replace(/(\*\*|__)(.*?)\1/g, '$2');
-  text = text.replace(/(\*|_)(.*?)\1/g, '$2');
-  text = text.replace(/^\s{0,3}#{1,6}\s+/gm, '');
-  text = text.replace(/^\s{0,3}>\s?/gm, '');
-  text = text.replace(/^\s*[-*+]\s+/gm, '');
-  text = text.replace(/^\s*\d+\.\s+/gm, '');
-  text = text.replace(/[|]/g, ' ');
-  text = text.replace(/^\s*(-{3,}|_{3,}|\*{3,})\s*$/gm, ' ');
-  text = text.replace(/^\s*(graph\s+(TD|LR)|mermaid|flowchart)[^\n]*$/gim, ' ');
-  text = text.replace(/\[[^\]\n]{10,}\]/g, ' ');
-  text = text.replace(/[\u{1F300}-\u{1FAFF}]/gu, ' ');
-  text = text.replace(/[ ]{2,}/g, ' ');
-  text = text.replace(/\s*\n\s*/g, ' ');
-  return text.replace(/\s{2,}/g, ' ').trim();
-};
-
-const splitSentences = (text: string) =>
-  text
-    .replace(/\s+/g, ' ')
-    .split(/(?<=[.!?])\s+/)
-    .map(s => s.trim())
-    .filter(Boolean);
-
-// Remove noisy prefixes like "Step 3:", "Diagram:", "Note:", etc.
-const stripNoisyPrefixes = (s: string) =>
-  s
-    .replace(/^\s*step\s*\d+\s*[:.\-]\s*/i, '')
-    .replace(/^\s*(diagram|note|example|tip|hint)\s*[:.\-]\s*/i, '');
-
-const looksLikeCodeOrNoise = (s: string) => {
-  if (!s) return true;
-  if (s.length < 25 || s.length > 200) return true;
-  if (/[{}<>~;`]/.test(s)) return true;
-  if (/https?:\/\//i.test(s)) return true;
-  if (/\b(graph\s+(TD|LR)|flowchart|mermaid)\b/i.test(s)) return true;
-  if (/[\[\]|]{3,}/.test(s)) return true;
-  const letters = (s.match(/[A-Za-z]/g) || []).length;
-  return letters / s.length < 0.6;
-};
-
-const tokenize = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[^a-z0-9\s\-']/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-
-const STOPWORDS = new Set([
-  'the','be','to','of','and','a','in','that','have','i','it','for','not','on','with','he','as','you','do','at',
-  'this','but','his','by','from','they','we','say','her','she','or','an','will','my','one','all','would','there',
-  'their','what','so','up','out','if','about','who','get','which','go','me','when','make','can','like','time',
-  'no','just','him','know','take','people','into','year','your','good','some','could','them','see','other','than',
-  'then','now','look','only','come','its','over','think','also','back','after','use','two','how','our','work',
-  'first','well','way','even','new','want','because','any','these','give','day','most','us'
-]);
-
-const isCandidateWord = (w: string) =>
-  w.length >= 5 && !STOPWORDS.has(w) && !/^\d+$/.test(w);
-
-// Use RNG to vary which keyword we blank
-const pickKeyword = (sentence: string, rng: RNG): string | null => {
-  const words = tokenize(sentence);
-  const unique = Array.from(new Set(words));
-  const candidates = unique
-    .filter(isCandidateWord)
-    .sort((a, b) => b.length - a.length || a.localeCompare(b));
-  if (candidates.length === 0) return null;
-  const topN = Math.min(6, candidates.length);
-  const idx = Math.floor(rng() * topN);
-  return candidates[idx] || null;
-};
-
-const makeVariant = (w: string, rng: RNG) => {
-  if (w.length < 5) return w;
-  const vowels = ['a','e','i','o','u'];
-  const chars = w.split('');
-  const idx = Math.max(1, Math.min(w.length - 2, Math.floor(rng() * (w.length - 2)) + 1));
-  if (/[a-z]/i.test(chars[idx])) {
-    const lower = chars[idx].toLowerCase();
-    if (vowels.includes(lower)) {
-      const vIdx = vowels.indexOf(lower);
-      const next = vowels[(vIdx + 1 + Math.floor(rng() * 3)) % vowels.length];
-      chars[idx] = /[A-Z]/.test(chars[idx]) ? next.toUpperCase() : next;
-    } else {
-      const base = lower.charCodeAt(0) - 97;
-      const step = 1 + Math.floor(rng() * 2);
-      const next = String.fromCharCode(((base + step) % 26) + 97);
-      chars[idx] = /[A-Z]/.test(chars[idx]) ? next.toUpperCase() : next;
-    }
-  }
-  return chars.join('');
-};
-
-const buildDistractors = (answer: string, pool: string[], count: number, rng: RNG) => {
-  const set = new Set<string>();
-  const base = answer.toLowerCase();
-
-  for (const w of shuffleRng(pool, rng)) {
-    const lw = w.toLowerCase();
-    if (lw !== base && Math.abs(lw.length - base.length) <= 3 && !set.has(lw)) {
-      set.add(lw);
-      if (set.size >= count) break;
-    }
-  }
-
-  while (set.size < count) set.add(makeVariant(base, rng));
-
-  return Array.from(set);
-};
-
-// Ensure nice blank and punctuation; trim/normalize spacing
-const toBlankedPrompt = (sentence: string, answer: string) => {
-  const cleaned = stripNoisyPrefixes(sentence);
-  const re = new RegExp(`\\b${answer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-  let p = cleaned.replace(re, '____').trim();
-  p = p.replace(/\s+([,.;:!?])/g, '$1').replace(/\s{2,}/g, ' ');
-  if (!/[.!?]$/.test(p)) p += '.';
-  const MAX = 160;
-  if (p.length > MAX) p = p.slice(0, MAX - 1).trimEnd() + '…';
-  return p;
-};
-
-// Capitalize first character only; preserves contractions like "You're"
-const niceLabel = (s: string) => s.trim().toLowerCase().replace(/^[a-z]/, c => c.toUpperCase());
-
-const buildQuestions = (raw: string, maxQ: number, rng: RNG): QuizQuestion[] => {
-  const cleaned = stripMarkdown(raw);
-  const filtered = splitSentences(cleaned)
-    .map(stripNoisyPrefixes)
-    .filter(s => !looksLikeCodeOrNoise(s));
-  if (!filtered.length) return [];
-
-  const sentences = shuffleRng(filtered, rng);
-
-  // Pool of candidate words across sentences
-  const pool = sentences
-    .flatMap(s => tokenize(s))
-    .filter(isCandidateWord);
-
-  const qs: QuizQuestion[] = [];
-
-  for (const s of sentences) {
-    if (qs.length >= maxQ) break;
-
-    const keyword = pickKeyword(s, rng);
-    if (!keyword) continue;
-
-    const prompt = toBlankedPrompt(s, keyword);
-    if (!prompt || prompt === s) continue;
-
-    const distractors = buildDistractors(keyword, pool, 3, rng);
-    const optionsRaw = shuffleRng([keyword, ...distractors], rng);
-
-    const options: QuizOption[] = optionsRaw.map(text => ({
-      id: uuid(),
-      text: niceLabel(text),
-      isCorrect: text.toLowerCase() === keyword.toLowerCase(),
-    }));
-
-    qs.push({
-      id: uuid(),
-      prompt,
-      answer: niceLabel(keyword),
-      source: s,
-      options,
-    });
-  }
-
-  return qs.slice(0, maxQ);
-};
-
-// ----------------------
-// Logic-first rule hints to shape reasons and diagrams
-// ----------------------
-type LogicHint = {
-  id: string;
-  applies: (s: string) => boolean;
-  correct: (q: QuizQuestion) => string;
-  wrong: (q: QuizQuestion, sel: string) => string;
-  diagram: (q: QuizQuestion, sel?: string) => string; // mermaid (no backticks)
-};
-
-const HINTS: LogicHint[] = [
-  {
-    id: 'unsupervised_patterns',
-    applies: (s) => /unsupervised/i.test(s) && /(find|discover|identify)\b/i.test(s) && /(unlabelled|unlabeled|without labels)/i.test(s),
-    correct: () => 'Unsupervised learning discovers structure (patterns/clusters) in unlabeled data.',
-    wrong: (_q, sel) => `"${sel}" is not a latent structure; it does not represent the discovered pattern in unlabeled data.`,
-    diagram: (_q, sel) =>
-      [
-        'flowchart TD',
-        'U[Unlabeled data] -->|discover| P[Patterns/Clusters]',
-        sel ? `S["Selected: ${sel.replace(/"/g, '\\"')}"] --> NO((Not a structure))` : '',
-        'P --> OK((Correct objective))',
-      ].filter(Boolean).join('\n'),
-  },
-  {
-    id: 'features_predictions',
-    applies: (s) => /\bfeatures?\b/i.test(s) && /(used for|to)\b/i.test(s),
-    correct: () => 'Features are inputs the model uses to produce predictions.',
-    wrong: (_q, sel) => `"${sel}" is not the model output produced from features.`,
-    diagram: (_q, sel) =>
-      [
-        'flowchart TD',
-        'F[Features (input)] --> M[Model]',
-        'M --> Y[Predictions (output)]',
-        sel ? `S["Selected: ${sel.replace(/"/g, '\\"')}"] --> NO((Not the output))` : '',
-        'Y --> OK((Correct))',
-      ].filter(Boolean).join('\n'),
-  },
-  {
-    id: 'reinforcement_agent',
-    applies: (s) => /reinforcement/i.test(s) || /training .* to (walk|move|act)/i.test(s),
-    correct: () => 'Reinforcement learning optimizes an acting entity (agent) via rewards.',
-    wrong: (_q, sel) => `"${sel}" is not the acting entity; RL needs an agent that takes actions.`,
-    diagram: (_q, sel) =>
-      [
-        'flowchart LR',
-        'A[Agent] -- action --> E[Environment]',
-        'E -- reward --> A',
-        sel ? `S["Selected: ${sel.replace(/"/g, '\\"')}"] --> NO((Not an agent))` : '',
-        'A --> OK((Correct entity))',
-      ].filter(Boolean).join('\n'),
-  },
-  {
-    id: 'binary_search',
-    applies: (s) => /\bbinary search\b/i.test(s) || /(midpoint|half|bisection|divide and conquer)/i.test(s),
-    correct: () => 'Binary search repeatedly halves the search interval around the midpoint.',
-    wrong: (_q, sel) => `"${sel}" does not express the halving/bisection step central to binary search.`,
-    diagram: (_q, sel) =>
-      [
-        'flowchart TD',
-        'S[Sorted array] --> M[Pick midpoint]',
-        'M -->|compare| L{target < mid?}',
-        'L -- yes --> Left[Keep left half]',
-        'L -- no --> Right[Keep right half]',
-        sel ? `S2["Selected: ${sel.replace(/"/g, '\\"')}"] --> NO((Not halving))` : '',
-        'Left --> OK((Bisection logic))',
-        'Right --> OK',
-      ].join('\n'),
-  },
-  {
-    id: 'supervised_labels',
-    applies: (s) => /supervised/i.test(s),
-    correct: () => 'Supervised learning maps inputs to labeled targets and minimizes error.',
-    wrong: (_q, sel) => `"${sel}" does not align with label-target learning.`,
-    diagram: (_q, sel) =>
-      [
-        'flowchart TD',
-        'X[Inputs] --> M[Model]',
-        'Y[Labels/Targets] --> L[Loss]',
-        'M --> Yhat[Predictions]',
-        'Yhat --> L',
-        'L -->|minimize| M',
-        sel ? `S["Selected: ${sel.replace(/"/g, '\\"')}"] --> NO((Not label-aligned))` : '',
-        'Y --> OK((Label objective))',
-      ].filter(Boolean).join('\n'),
-  },
-];
-
-const getFirstHint = (s: string) => HINTS.find(h => h.applies(s));
-
-// ----------------------
-// Formatting enforcement
-// ----------------------
-const isGrammarish = (t: string) =>
-  /\bgrammar|grammatical|word choice|phrase|fits the sentence|linguistic|syntax\b/i.test(t);
-
-// Strip any markdown-like headings, emojis, bullets, emphasis; normalize to one short paragraph
-const sanitizeToParagraph = (raw?: string) => {
-  if (!raw) return '';
-  let t = raw;
-
-  // Remove code fences and inline code
-  t = t.replace(/```[\s\S]*?```/g, ' ');
-  t = t.replace(/`[^`]*`/g, ' ');
-
-  // Remove headings and list markers
-  t = t.replace(/^\s{0,3}#{1,6}\s+/gm, '');
-  t = t.replace(/^\s*[-*+]\s+/gm, '');
-  t = t.replace(/^\s*\d+\.\s+/gm, '');
-
-  // Remove emphasis markers
-  t = t.replace(/(\*\*|__)(.*?)\1/g, '$2');
-  t = t.replace(/(\*|_)(.*?)\1/g, '$2');
-
-  // Remove leading/trailing dashes used as bullets
-  t = t.replace(/(?:^|\n|\s)[–—-]\s+/g, ' ');
-
-  // Remove emojis and stray symbols
-  t = t.replace(/[\u{1F300}-\u{1FAFF}]/gu, ' ');
-
-  // Collapse whitespace
-  t = t.replace(/\s+/g, ' ').trim();
-
-  // Keep max 2 sentences, cap length
-  const one = t.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ');
-  const capped = one.length > 360 ? one.slice(0, 360).trimEnd() + '…' : one;
-
-  // Ensure final punctuation
-  return /[.!?]$/.test(capped) ? capped : capped + '.';
-};
-
-// Build two explicit reasons and a diagram from the same reasons
-const composeReasons = (q: QuizQuestion, selected?: string, aiText?: string) => {
-  const hint = getFirstHint(q.source);
-  let correctReason = hint ? hint.correct(q) : `The correct choice "${q.answer}" matches the underlying concept the sentence describes.`;
-  const wrongReason = selected ? (hint ? hint.wrong(q, selected) : `"${selected}" does not align with the concept required by the sentence.`) : '';
-
-  // If AI text exists and is not grammar-focused, we can incorporate it for correctness-only phrasing,
-  // but we still keep the explicit wrong/correct separation.
-  if (aiText && !isGrammarish(aiText)) {
-    const clean = sanitizeToParagraph(aiText);
-    // Try to split AI text into two parts with connectors; otherwise keep as correctReason.
-    // We prefer keeping our deterministic reasons to guarantee coverage of both sides.
-    if (!hint) correctReason = clean;
-  }
-
-  // Final single paragraph: when wrong, concatenate; when right, only correctReason.
-  const buildParagraph = (isCorrect: boolean) => {
-    if (isCorrect) return sanitizeToParagraph(correctReason);
-    return sanitizeToParagraph(`${wrongReason} ${correctReason}`);
-  };
-
-  const buildDiagram = (isCorrect: boolean) => {
-    if (hint) {
-      return hint.diagram(q, selected);
-    }
-    // Generic logic-aligned diagram
-    const sel = selected ? selected.replace(/"/g, '\\"') : '';
-    return [
-      'flowchart TD',
-      `CTX["${q.prompt.replace('____', '(blank)').replace(/"/g, '\\"')}"] --> D{Fill choice}`,
-      sel ? `D --> S["Selected: ${sel}"]` : 'D --> S["Selected"]',
-      `D --> C["Correct: ${q.answer.replace(/"/g, '\\"')}"]`,
-      isCorrect ? 'S --> OK((Correct))' : 'S --> NO((Mismatch))',
-      'C --> WHY[Concept aligns with objective]',
-    ].join('\n');
-  };
-
-  return { correctReason, wrongReason, buildParagraph, buildDiagram };
-};
-
-// ----------------------
-// AI-backed explanations (same endpoint as page.tsx), paragraph only
-// ----------------------
-type ExplanationState = {
-  status: 'idle' | 'loading' | 'done' | 'error';
-  text?: string;
-  chart?: string;
-  error?: string;
-};
-
-async function getAIParagraph(q: QuizQuestion, selected: string | undefined) {
-  const isCorrect = selected?.toLowerCase() === q.answer.toLowerCase();
-  const hint = getFirstHint(q.source);
-
-  const logicGuide = hint
-    ? `Logic focus: ${hint.id}`
-    : 'Logic focus: derive a causal/functional relation from the sentence (no grammar).';
-
-  // Hard requirements to avoid markdown/emoji and forbid grammar talk
-  const notes = [
-    'You are generating a concise, logic-first explanation for a multiple-choice quiz.',
-    'STRICT RULES:',
-    '- Do NOT discuss grammar, wording, phrasing, or syntax.',
-    '- Do NOT use headings, lists, bullets, emojis, or markdown emphasis in the paragraph.',
-    '- Produce ONE short paragraph (max 2 sentences) focused ONLY on domain logic.',
-    '',
-    `Full sentence: "${q.source}"`,
-    `Blank version: "${q.prompt}"`,
-    `Correct answer: "${q.answer}"`,
-    `Learner selected: "${selected ?? '(none)'}" (${isCorrect ? 'correct' : 'incorrect'})`,
-    logicGuide,
-  ].join('\n');
-
-  const res = await fetch(`${API_URL}/process-content`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ notes, files: [] }),
-  });
-
-  if (!res.ok) throw new Error(`Server error ${res.status}`);
-
-  const data = await res.json();
-  return (data?.status === 'success' ? (data?.response ?? '') : '').toString();
+  while(qs.length<count){const [kw,...rest]=shuffle(keywords).slice(0,4); if(!kw||rest.length<3) break; const pool=shuffle([kw,...rest]); qs.push({id:uuid(), stem:'Which term best completes the idea: ___ ?', options: pool.map(capitalize), correctIndex: pool.findIndex(o=>o===kw)});}
+  return qs.length?qs.slice(0,count):fallbackQuestions();
 }
+function fallbackQuestions():Question[]{const base=[{stem:'Feedback ___ are essential.',options:['Model','Trained','Produces','Loops'],correctIndex:3},{stem:'Iteration and Improvement: The process is ___.',options:['Algorithms','Improvement','Iterative','Instructions'],correctIndex:2},{stem:'Examples include linear regression, ___ trees, and neural networks.',options:['Algorithms','Decision','Simplified','Examples'],correctIndex:1},{stem:'Data is Key: Machine ___ algorithms learn from data.',options:['Algorithms','Learning','Trained','Unseen'],correctIndex:1},{stem:'A simplified data flow in machine learning: ___',options:['Caption','Output','Decision','Algorithms'],correctIndex:3},];return base.map(q=>({...q,id:uuid()}));}
 
-// ----------------------
-// Component
-// ----------------------
-export default function Quiz({ text }: { text: string }) {
-  const [seed, setSeed] = useState(() => uuid());
-  const [checked, setChecked] = useState(false);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [explanations, setExplanations] = useState<Record<string, ExplanationState>>({});
-  const [copyOk, setCopyOk] = useState<string | null>(null);
+type Props={ text:string; count?:number; className?:string; };
 
-  // Create a seeded RNG and rebuild questions whenever seed changes
-  const rng = useMemo(() => createRng(seed), [seed]);
-  const questions = useMemo(() => buildQuestions(text, 5, rng), [text, rng]);
+export default function Quiz({ text, count=5, className='' }: Props) {
+  const [questions,setQuestions]=useState<Question[]>([]);
+  const [revealed,setRevealed]=useState(false);
+  const [burstFromRect,setBurstFromRect]=useState<DOMRect|null>(null);
+  const [showBurst,setShowBurst]=useState(false);
+  const awardedOnceRef=useRef(false);
+  const checkBtnRef=useRef<HTMLButtonElement|null>(null);
+  const { addPoints } = usePoints();
 
-  const allAnswered = questions.length > 0 && questions.every(q => answers[q.id]);
+  const score = useMemo(()=> revealed ? questions.reduce((a,q)=>a+(q.selectedIndex===q.correctIndex?1:0),0) : 0,[questions,revealed]);
 
-  const onSelect = useCallback((qid: string, oid: string) => {
-    setAnswers(prev => ({ ...prev, [qid]: oid }));
-  }, []);
+  useEffect(()=>{ setQuestions(buildQuestionsFromText(text,count)); setRevealed(false); awardedOnceRef.current=false; },[text,count]);
 
-  const fetchAllExplanations = useCallback(async () => {
-    const init: Record<string, ExplanationState> = {};
-    for (const q of questions) {
-      if (!answers[q.id]) continue;
-      init[q.id] = { status: 'loading' };
-    }
-    setExplanations(prev => ({ ...prev, ...init }));
+  const selectOption=(qid:string,idx:number)=>setQuestions(prev=>prev.map(q=>q.id===qid?{...q,selectedIndex:idx}:q));
+  const regenerate=()=>{ setQuestions(buildQuestionsFromText(text,count)); setRevealed(false); awardedOnceRef.current=false; };
 
-    await Promise.all(
-      questions.map(async (q) => {
-        const selectedOpt = q.options.find(o => o.id === answers[q.id]);
-        if (!selectedOpt) return;
-
-        try {
-          const aiParagraphRaw = await getAIParagraph(q, selectedOpt.text);
-          const { buildParagraph, buildDiagram } = composeReasons(q, selectedOpt.text, aiParagraphRaw);
-          const isCorrect = !!selectedOpt.isCorrect;
-          const paragraph = buildParagraph(isCorrect);
-          const chart = buildDiagram(isCorrect);
-          setExplanations(prev => ({
-            ...prev,
-            [q.id]: { status: 'done', text: paragraph, chart },
-          }));
-        } catch {
-          // Fallback: purely rules-based
-          const { buildParagraph, buildDiagram } = composeReasons(q, selectedOpt.text);
-          const isCorrect = !!selectedOpt.isCorrect;
-          setExplanations(prev => ({
-            ...prev,
-            [q.id]: { status: 'done', text: buildParagraph(isCorrect), chart: buildDiagram(isCorrect) },
-          }));
-        }
-      })
-    );
-  }, [questions, answers]);
-
-  const onCheck = useCallback(async () => {
-    setChecked(true);
-    await fetchAllExplanations();
-  }, [fetchAllExplanations]);
-
-  const onReset = useCallback(() => {
-    setChecked(false);
-    setAnswers({});
-    setExplanations({});
-    setSeed(uuid() + Date.now().toString(36)); // new seed => new questions
-  }, []);
-
-  const handleCopy = async (content: string, key: string) => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopyOk(key);
-      setTimeout(() => setCopyOk(null), 1400);
-    } catch {
-      // ignore
+  const check=()=>{
+    setRevealed(true);
+    if(awardedOnceRef.current) return;
+    const correct = questions.reduce((a,q)=>a+(q.selectedIndex===q.correctIndex?1:0),0);
+    if(correct>0){
+      const fromRect = checkBtnRef.current?.getBoundingClientRect() || null;
+      setBurstFromRect(fromRect);
+      setShowBurst(true);
+      addPoints(correct * POINTS_PER_CORRECT);
+      awardedOnceRef.current = true;
     }
   };
-
-  if (questions.length === 0) {
-    return (
-      <div className="p-5 text-sm text-slate-500">
-        Not enough context to generate a quiz. Try asking a more detailed question first.
-      </div>
-    );
-  }
-
-  const score = checked
-    ? questions.reduce((acc, q) => {
-        const sel = answers[q.id];
-        const opt = q.options.find(o => o.id === sel);
-        return acc + (opt?.isCorrect ? 1 : 0);
-      }, 0)
-    : 0;
 
   return (
-    <div className="p-5">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-slate-700">
-          <Sparkles size={16} className="text-violet-600" />
-          <span className="font-semibold">Quick Quiz</span>
-          <span className="text-xs text-slate-500">• {questions.length} questions</span>
+    <div className={`quiz-root p-[1px] rounded-2xl bg-gradient-to-r from-violet-700/35 via-fuchsia-600/30 to-blue-600/35 shadow-md ${className}`}>
+      <div className="rounded-2xl border border-slate-800 bg-slate-950/70">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-slate-800">
+          <div className="flex items-center gap-2 text-slate-200 font-semibold">
+            <Sparkles size={16} className="text-violet-400" />
+            <span>Quick Quiz</span>
+            <span className="text-slate-500 font-normal">• {questions.length} questions</span>
+            {revealed && <span className="ml-2 text-slate-400 text-sm">Score: {score}/{questions.length}</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={regenerate} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-slate-900/60 border border-slate-800 text-slate-300 hover:bg-slate-900" title="Regenerate">
+              <RotateCw size={14}/> Regenerate
+            </button>
+            <button ref={checkBtnRef} type="button" onClick={check} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-gradient-to-r from-violet-600 via-fuchsia-600 to-blue-600 text-white hover:brightness-110" title="Check answers">
+              <CheckCircle2 size={14}/> Check answers
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onReset}
-            className="px-2.5 py-1.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
-          >
-            <span className="inline-flex items-center gap-1">
-              <RotateCcw size={14} /> Regenerate
-            </span>
-          </button>
-          <button
-            onClick={onCheck}
-            disabled={!allAnswered}
-            className="px-3 py-1.5 text-xs rounded-md bg-slate-800 text-white disabled:bg-slate-300 disabled:text-white/90"
-          >
-            <span className="inline-flex items-center gap-1">
-              <Check size={14} /> Check answers
-            </span>
-          </button>
-        </div>
-      </div>
 
-      <ul className="space-y-4">
-        {questions.map((q, idx) => {
-          const selected = answers[q.id];
-          const selectedOpt = q.options.find(o => o.id === selected);
-          const isCorrect = !!(selectedOpt && selectedOpt.isCorrect);
-
-          const expl = explanations[q.id];
-          const hasExpl = checked && selectedOpt;
-          const mermaidMarkdown = expl?.chart ? ['```mermaid', expl.chart, '```'].join('\n') : '';
-
-          return (
-            <li key={q.id} className="rounded-lg border border-slate-200 bg-white/80">
-              <div className="p-4">
-                <div className="mb-2 text-sm font-medium text-slate-800 break-words">
-                  Q{idx + 1}. {q.prompt}
+        {/* Questions */}
+        <div className="p-4 sm:p-5 space-y-4">
+          {questions.map((q,qi)=>{
+            const isAnswered=typeof q.selectedIndex==='number';
+            const isCorrect=revealed&&isAnswered&&q.selectedIndex===q.correctIndex;
+            const isWrong=revealed&&isAnswered&&q.selectedIndex!==q.correctIndex;
+            return (
+              <div key={q.id} className={`rounded-xl border ${isCorrect?'border-emerald-700/60 bg-emerald-900/10':isWrong?'border-rose-800/60 bg-rose-900/10':'border-slate-800 bg-slate-900/40'}`}>
+                <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+                  <div className="text-slate-300 font-medium">Q{qi+1}. {q.stem}</div>
+                  {revealed && (
+                    <div className="text-sm">
+                      {isCorrect ? <span className="inline-flex items-center gap-1 text-emerald-300"><CheckCircle2 size={14}/> Correct</span>
+                                 : isWrong ? <span className="inline-flex items-center gap-1 text-rose-300"><XCircle size={14}/> Incorrect</span>
+                                           : null}
+                    </div>
+                  )}
                 </div>
-                <div className="grid sm:grid-cols-2 gap-2">
-                  {q.options.map(o => {
-                    const isSelected = selected === o.id;
-                    const stateClass =
-                      checked && isSelected
-                        ? o.isCorrect
-                          ? 'border-emerald-300 bg-emerald-50'
-                          : 'border-red-300 bg-red-50'
-                        : 'border-slate-200 bg-white';
 
+                <div className="p-3 sm:p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {q.options.map((opt,oi)=>{
+                    const selected=q.selectedIndex===oi;
+                    const correct=revealed&&q.correctIndex===oi;
+                    const wrong=revealed&&selected&&q.correctIndex!==oi;
+                    const base='opt-tile w-full text-left rounded-xl px-3 py-2.5 border transition-all focus:outline-none focus-visible:outline-none';
+                    const pal= selected&&!revealed ? 'border-transparent text-white shadow-md bg-gradient-to-r from-violet-600 via-fuchsia-600 to-blue-600'
+                              : correct ? 'border-transparent text-white shadow-md bg-gradient-to-r from-emerald-600 to-teal-600'
+                              : wrong   ? 'border-transparent text-white shadow-md bg-gradient-to-r from-rose-600 to-red-600'
+                              : 'border-slate-700 text-slate-200 bg-slate-900/60 hover:bg-slate-900';
                     return (
-                      <label
-                        key={o.id}
-                        className={`flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors ${stateClass}`}
-                      >
-                        <input
-                          type="radio"
-                          name={`q-${q.id}`}
-                          className="accent-slate-800"
-                          checked={isSelected}
-                          onChange={() => onSelect(q.id, o.id)}
-                        />
-                        <span className="text-sm text-slate-700">{o.text}</span>
+                      <label key={oi} className="inline-block">
+                        <input type="radio" name={`q-${q.id}`} className="peer sr-only" checked={selected} onChange={()=>selectOption(q.id,oi)} />
+                        <div className={`${base} ${pal}`} aria-pressed={selected}
+                          data-state={ selected&&!revealed ? 'selected' : correct ? 'correct' : wrong ? 'wrong' : 'default' }>
+                          {opt}
+                        </div>
                       </label>
                     );
                   })}
                 </div>
 
-                <AnimatePresence>
-                  {hasExpl && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                      animate={{ opacity: 1, height: 'auto', marginTop: 12 }}
-                      className="text-sm space-y-3"
-                    >
-                      {isCorrect ? (
-                        <div className="text-emerald-700 font-medium">
-                          Correct! The answer is {selectedOpt?.text}.
-                        </div>
-                      ) : (
-                        <div className="text-red-700 font-medium">
-                          Not quite. Correct answer: {q.answer}.
-                        </div>
-                      )}
-
-                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 space-y-3">
-                        {expl?.status === 'loading' && (
-                          <div className="flex items-center gap-2 text-slate-600">
-                            <Loader2 size={16} className="animate-spin" />
-                            <span>Generating explanation…</span>
-                          </div>
-                        )}
-
-                        {expl?.status === 'done' && (
-                          <>
-                            {expl.text && (
-                              <p className="text-slate-700 leading-relaxed">
-                                {expl.text}
-                              </p>
-                            )}
-
-                            {expl.chart && (
-                              <div>
-                                <div className="mb-1 flex items-center justify-between">
-                                  <div className="font-medium text-slate-600 text-xs">Diagram</div>
-                                  <button
-                                    onClick={() => mermaidMarkdown && handleCopy(mermaidMarkdown, q.id)}
-                                    className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-800"
-                                    title="Copy mermaid markdown"
-                                  >
-                                    <Copy size={14} />
-                                    {copyOk === q.id ? 'Copied' : 'Copy'}
-                                  </button>
-                                </div>
-                                <div className="rounded border border-slate-200 bg-white p-2">
-                                  <MermaidDiagram chart={expl.chart} />
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        )}
-
-                        {expl?.status === 'error' && (
-                          <p className="text-slate-700">
-                            Could not generate an explanation. Please try again.
-                          </p>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {revealed && (
+                  <div className="px-4 pb-4 text-sm text-slate-400">
+                    Correct answer: <span className="text-slate-200">{q.options[q.correctIndex]}</span>
+                  </div>
+                )}
               </div>
-            </li>
-          );
-        })}
-      </ul>
+            );
+          })}
+        </div>
+      </div>
 
-      <AnimatePresence>
-        {checked && (
-          <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-4 text-sm font-semibold text-slate-700"
-          >
-            Score: {score} / {questions.length}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Coin burst overlay */}
+      {showBurst && (
+        <CoinBurst
+          fromRect={burstFromRect}
+          count={Math.min(10, Math.max(4, score))} // more correct => more coins
+          onComplete={()=>setShowBurst(false)}
+        />
+      )}
     </div>
   );
 }

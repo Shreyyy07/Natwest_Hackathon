@@ -13,7 +13,6 @@ import { UploadClient } from "@uploadcare/upload-client";
 import { useRouter } from "next/navigation";
 import PDFUploader from '../components/PDFUploader'; 
 
-
 const client = new UploadClient({
   publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUBLIC_KEY!,
 });

@@ -1,3 +1,14 @@
+@layer utilities {
+  .bg-background {
+    background-color: hsl(var(--background));
+  }
+  .border-border {
+    border-color: hsl(var(--border));
+  }
+  .text-foreground {
+    color: hsl(var(--foreground));
+  }
+}
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -348,10 +359,11 @@ html, body {
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: hsl(var(--border));
   }
   body {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
   }
 }
 
@@ -396,9 +408,29 @@ html, body {
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    border-color: hsl(var(--border));
+    outline-color: hsl(var(--ring) / 0.5);
   }
   body {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
   }
+}
+/* === Quiz: force dark tile baseline and allow gradients on selected/correct/wrong === */
+.quiz-root .opt-tile {
+  background: none !important;
+  background-color: #0b1220 !important; /* slate-950-ish */
+  border-color: #1f2937 !important;     /* slate-800-ish */
+  color: #e2e8f0 !important;
+  box-shadow: none !important;
+}
+.quiz-root .opt-tile[data-state="default"]:hover {
+  background-color: #111827 !important;  /* slate-900-ish */
+}
+.quiz-root .opt-tile[data-state="selected"],
+.quiz-root .opt-tile[data-state="correct"],
+.quiz-root .opt-tile[data-state="wrong"] {
+  background: unset !important;          /* allow gradient utilities to show */
+  border-color: transparent !important;
+  color: #ffffff !important;
 }

@@ -25,21 +25,17 @@ function LoadingFallback() {
   );
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+import './globals.css';
+import PointsProvider from './components/points/PointsProvider';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ClerkProvider>
-      <html lang="en" className={inter.className}>
-        <body className={inter.className}>
-          <Suspense fallback={<LoadingFallback />}>
-            {children}
-          </Suspense>
-          <Toaster position="top-right" />
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en">
+      <body>
+        <PointsProvider>
+          {children}
+        </PointsProvider>
+      </body>
+    </html>
   );
 }
